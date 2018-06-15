@@ -29,11 +29,11 @@ def train(num_timesteps, seed):
         return env
 
     env = DummyVecEnv([make_env])
-    env = VecNormalize(env)
+    env = VecNormalize(env, ret=False, cliprew=200)
 
     set_global_seeds(seed)
     policy = MlpPolicy
-    model = ppo2.learn(policy=policy, env=env, nsteps=2048, nminibatches=32,
+    model = ppo2.learn(policy=policy, env=env, nsteps=100, nminibatches=25,
                        lam=0.95, gamma=0.99, noptepochs=10, log_interval=1,
                        ent_coef=0.0,
                        lr=3e-4,
@@ -45,7 +45,7 @@ def train(num_timesteps, seed):
 
 def main():
     logger.configure()
-    model, env = train(num_timesteps=1e6, seed=123)
+    model, env = train(num_timesteps=1e5, seed=123)
 
     logger.log("Running trained model")
     for _ in range(20):
@@ -55,6 +55,9 @@ def main():
             actions = model.step(obs)[0]
             obs[:], _, done, _ = env.step(actions)
             env.render()
+            if done:
+                print("Done")
+                break
 
 
 if __name__ == '__main__':

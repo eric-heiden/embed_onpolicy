@@ -19,7 +19,7 @@ DARK_COLOR = (150, 150, 150)
 
 
 class PointEnv(gym.Env):
-    def __init__(self, goal=(1, 1), show_traces=True):
+    def __init__(self, goal=(5, 2), show_traces=True):
         self._goal = np.array(goal, dtype=np.float32)
         self._point = np.zeros(2)
 
@@ -30,6 +30,7 @@ class PointEnv(gym.Env):
         self.show_traces = show_traces
 
         self._traces = deque(maxlen=MAX_SHOWN_TRACES)
+        self._step = 0
 
     @property
     def observation_space(self):
@@ -41,12 +42,14 @@ class PointEnv(gym.Env):
 
     def reset(self):
         self._point = np.zeros_like(self._goal)
-        self._traces.append([])
+        self._traces.append([tuple(self._point)])
+        self._step = 0
         return np.copy(self._point)
 
     def step(self, action):
         self._point = self._point + action
         self._traces[-1].append(tuple(self._point))
+        self._step += 1
 
         done = np.linalg.norm(self._point - self._goal, ord=np.inf) < 0.1
         reward = -np.linalg.norm(self._point - self._goal)
@@ -55,7 +58,13 @@ class PointEnv(gym.Env):
         if done:
             reward = 2000.0
 
-        return np.copy(self._point), reward, done, {}
+        info = {
+                    "episode": {
+                        "l": self._step,
+                        "r": reward
+                    }
+                }
+        return np.copy(self._point), reward, done, info
 
     def _to_screen(self, position):
         return (int(self.screen_width / 2 + position[0] * self.zoom),
@@ -86,15 +95,15 @@ class PointEnv(gym.Env):
                              self._to_screen((-10, dy)),
                              self._to_screen((10, dy)))
 
-        # draw starting point
+        # draw starting point (blue)
         pygame.draw.circle(self.screen, (0, 0, 255), self._to_screen((0, 0)),
                            10, 0)
 
-        # draw goal
+        # draw goal (red)
         pygame.draw.circle(self.screen, (255, 40, 0),
                            self._to_screen(self._goal), 10, 0)
 
-        # draw point
+        # draw point (green)
         pygame.draw.circle(self.screen, (40, 180, 10),
                            self._to_screen(self._point), 10, 0)
 
