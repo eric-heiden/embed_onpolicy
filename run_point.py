@@ -2,18 +2,19 @@
 
 import sys
 import os.path as osp
+import numpy as np
+import tensorflow as tf
+
 sys.path.insert(0, osp.join(osp.dirname(__file__), 'baselines'))
 
-import numpy as np
 from baselines import bench, logger
 from baselines.common import set_global_seeds
 from baselines.common.vec_env.vec_normalize import VecNormalize
-import ppo2
-from policies import MlpPolicy
-import tensorflow as tf
 from baselines.common.vec_env.dummy_vec_env import DummyVecEnv
 
 from point_env import PointEnv
+from policies import MlpPolicy
+import ppo2
 
 
 def train(num_timesteps, seed):
@@ -45,7 +46,7 @@ def train(num_timesteps, seed):
 
 def main():
     logger.configure()
-    model, env = train(num_timesteps=1e5, seed=123)
+    model, env = train(num_timesteps=1e4, seed=123)
 
     logger.log("Running trained model")
     for _ in range(20):

@@ -13,14 +13,17 @@ TRACE_COLORS = [
     (100, 210, 30),
     (140, 230, 50),
     (180, 250, 150)
-] # yapf: disable
+]  # yapf: disable
 BRIGHT_COLOR = (200, 200, 200)
 DARK_COLOR = (150, 150, 150)
 
+TASKS = [(3, 0), (0, 3), (-3, 0), (0, -3)]
+
 
 class PointEnv(gym.Env):
-    def __init__(self, goal=(5, 2), show_traces=True):
-        self._goal = np.array(goal, dtype=np.float32)
+    def __init__(self, show_traces=True):
+        self._task = 0
+        self._goal = np.array(TASKS[self._task], dtype=np.float32)
         self._point = np.zeros(2)
 
         self.screen = None
@@ -34,16 +37,22 @@ class PointEnv(gym.Env):
 
     @property
     def observation_space(self):
-        return gym.spaces.Box(low=-np.inf, high=np.inf, shape=(2, ))
+        return gym.spaces.Box(low=-np.inf, high=np.inf, shape=(2,))
 
     @property
     def action_space(self):
-        return gym.spaces.Box(low=-0.1, high=0.1, shape=(2, ))
+        return gym.spaces.Box(low=-0.1, high=0.1, shape=(2,))
+
+    @property
+    def task(self):
+        return self._task
 
     def reset(self):
         self._point = np.zeros_like(self._goal)
         self._traces.append([tuple(self._point)])
         self._step = 0
+        self._task = (self._task + 1) % len(TASKS)
+        self._goal = np.array(TASKS[self._task], dtype=np.float32)
         return np.copy(self._point)
 
     def step(self, action):
@@ -51,19 +60,23 @@ class PointEnv(gym.Env):
         self._traces[-1].append(tuple(self._point))
         self._step += 1
 
-        done = np.linalg.norm(self._point - self._goal, ord=np.inf) < 0.1
-        reward = -np.linalg.norm(self._point - self._goal)
+        distance = np.linalg.norm(self._point - self._goal)
+        done = distance < 0.5
+        reward = -distance
 
         # completion bonus
         if done:
             reward = 2000.0
 
+        onehot = np.zeros(len(TASKS))
+        onehot[self._task] = 1
         info = {
-                    "episode": {
-                        "l": self._step,
-                        "r": reward
-                    }
-                }
+            "episode": {
+                "l": self._step,
+                "r": reward,
+                "task": np.copy(onehot)
+            }
+        }
         return np.copy(self._point), reward, done, info
 
     def _to_screen(self, position):
@@ -84,14 +97,12 @@ class PointEnv(gym.Env):
         # draw grid
         for x in range(25):
             dx = -6. + x * 0.5
-            pygame.draw.line(self.screen, DARK_COLOR
-                             if x % 2 == 0 else BRIGHT_COLOR,
+            pygame.draw.line(self.screen, DARK_COLOR if x % 2 == 0 else BRIGHT_COLOR,
                              self._to_screen((dx, -10)),
                              self._to_screen((dx, 10)))
         for y in range(25):
             dy = -6. + y * 0.5
-            pygame.draw.line(self.screen, DARK_COLOR
-                             if y % 2 == 0 else BRIGHT_COLOR,
+            pygame.draw.line(self.screen, DARK_COLOR if y % 2 == 0 else BRIGHT_COLOR,
                              self._to_screen((-10, dy)),
                              self._to_screen((10, dy)))
 
