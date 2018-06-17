@@ -3,6 +3,7 @@ import tensorflow as tf
 from gym.spaces import Discrete, Box
 from baselines.a2c.utils import conv, fc, conv_to_fc, batch_to_seq, seq_to_batch, lstm, lnlstm
 from baselines.common.distributions import make_pdtype
+from baselines import bench, logger
 
 
 def space_input(space, batch_size=None, name='Ob'):
@@ -72,14 +73,14 @@ class MlpEmbedPolicy(object):
 
             # task input
             Task, processed_t = space_input(task_space, nbatch, name="task")
-            processed_t = tf.layers.flatten(processed_t)
+            processed_t = tf.layers.flatten(processed_t, "flattened_t")
 
-            # embedding network (with task as input)
-            em_h1 = tf.tanh(fc(processed_t, 'embed_fc1', nh=16, init_scale=np.sqrt(2)))
-            em_h2 = tf.tanh(fc(em_h1, 'embed_fc2', nh=latent_space.shape[0], init_scale=np.sqrt(2)))
+            # # # embedding network (with task as input)
+            # em_h1 = tf.tanh(fc(processed_t, 'embed_fc1', nh=8, init_scale=0.5), name="em_h1")
+            # em_h2 = tf.tanh(fc(em_h1, 'embed_fc2', nh=latent_space.shape[0], init_scale=0.5), name="em_h2")
 
             # embedding variable
-            Embedding = em_h2  # tf.Variable(tf.zeros((nbatch,) + latent_space.shape), dtype=latent_space.dtype, name="embedding")
+            Embedding = Task  # tf.Variable(tf.zeros((nbatch,) + latent_space.shape), dtype=latent_space.dtype, name="embedding")
             # tf.assign(Embedding, em_h2, name="embedding_from_task")
 
             # observation input
@@ -90,17 +91,18 @@ class MlpEmbedPolicy(object):
             em_ob = tf.concat((Embedding, processed_ob), axis=1, name="em_ob")
 
             # policy
-            pi_h1 = tf.tanh(fc(em_ob, 'pi_fc1', nh=16, init_scale=np.sqrt(2)))
-            pi_h2 = tf.tanh(fc(pi_h1, 'pi_fc2', nh=16, init_scale=np.sqrt(2)))
+            pi_h1 = tf.tanh(fc(em_ob, 'pi_fc1', nh=16, init_scale=np.sqrt(2)), name="pi_h1")
+            pi_h2 = tf.tanh(fc(pi_h1, 'pi_fc2', nh=16, init_scale=np.sqrt(2)), name="pi_h2")
+            # pi_h2 = tf.clip_by_value(pi_h2, ac_space.low[0], ac_space.high[0])
 
             # value function
-            vf_h1 = tf.tanh(fc(em_ob, 'vf_fc1', nh=16, init_scale=np.sqrt(2)))
-            vf_h2 = tf.tanh(fc(vf_h1, 'vf_fc2', nh=16, init_scale=np.sqrt(2)))
+            vf_h1 = tf.tanh(fc(em_ob, 'vf_fc1', nh=16, init_scale=np.sqrt(2)), name="vf_h1")
+            vf_h2 = tf.tanh(fc(vf_h1, 'vf_fc2', nh=16, init_scale=np.sqrt(2)), name="vf_h2")
             vf = fc(vf_h2, 'vf', 1)[:, 0]
 
             self.pd, self.pi = self.pdtype.pdfromlatent(pi_h2, init_scale=0.01)
 
-        a0 = self.pd.sample()
+        a0 = self.pd.sample()  # tf.clip_by_value(self.pd.sample(), ac_space.low[0], ac_space.high[0])
         neglogp0 = self.pd.neglogp(a0)
         self.initial_state = None
 
@@ -108,8 +110,15 @@ class MlpEmbedPolicy(object):
             a, v, neglogp = sess.run([a0, vf, neglogp0], {Observation: ob, Embedding: latent})
             return a, v, self.initial_state, neglogp
 
+        def step_from_task(task, ob, *_args, **_kwargs):
+            a, v, neglogp = sess.run([a0, vf, neglogp0], {Observation: ob, Task: task})
+            return a, v, self.initial_state, neglogp
+
         def value(latent, ob, *_args, **_kwargs):
             return sess.run(vf, {Observation: ob, Embedding: latent})
+
+        def value_from_task(task, ob, *_args, **_kwargs):
+            return sess.run(vf, {Observation: ob, Task: task})
 
         self.Observation = Observation
         self.Task = Task
@@ -117,4 +126,6 @@ class MlpEmbedPolicy(object):
 
         self.vf = vf
         self.step = step
+        self.step_from_task = step_from_task
         self.value = value
+        self.value_from_task = value_from_task

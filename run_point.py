@@ -2,6 +2,8 @@
 
 import sys
 import os.path as osp
+from datetime import datetime
+
 import numpy as np
 import tensorflow as tf
 
@@ -15,6 +17,9 @@ from baselines.common.vec_env.dummy_vec_env import DummyVecEnv
 from point_env import PointEnv
 from policies import MlpPolicy
 import ppo2
+
+
+SEED = 123
 
 
 def train(num_timesteps, seed):
@@ -45,8 +50,12 @@ def train(num_timesteps, seed):
 
 
 def main():
-    logger.configure()
-    model, env = train(num_timesteps=1e4, seed=123)
+    timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    log_folder = osp.join(osp.dirname(__file__), 'log/point_%i_%s' % (SEED, timestamp))
+    print("Logging to %s." % log_folder)
+    logger.configure(dir=log_folder,
+                     format_strs=['stdout', 'log', 'csv', 'tensorboard'])
+    model, env = train(num_timesteps=1e4, seed=SEED)
 
     logger.log("Running trained model")
     for _ in range(20):

@@ -17,7 +17,9 @@ TRACE_COLORS = [
 BRIGHT_COLOR = (200, 200, 200)
 DARK_COLOR = (150, 150, 150)
 
-TASKS = [(3, 0), (0, 3), (-3, 0), (0, -3)]
+TASKS = [(3, 0), (-3, 0)]  # (0, 3), (-3, 0), (0, -3)]
+
+MIN_DIST = 1.5
 
 
 class PointEnv(gym.Env):
@@ -61,11 +63,11 @@ class PointEnv(gym.Env):
         self._step += 1
 
         distance = np.linalg.norm(self._point - self._goal)
-        done = distance < 0.5
+        done = distance < MIN_DIST or distance > 20
         reward = -distance
 
         # completion bonus
-        if done:
+        if done and distance < MIN_DIST:
             reward = 2000.0
 
         onehot = np.zeros(len(TASKS))
@@ -124,7 +126,8 @@ class PointEnv(gym.Env):
                 if len(trace) > 1:
                     pygame.draw.lines(
                         self.screen,
-                        TRACE_COLORS[-min(len(TRACE_COLORS) - 1, i)], False,
+                        TRACE_COLORS[-min(len(TRACE_COLORS) - 1, i)],
+                        False,
                         [self._to_screen(p) for p in trace])
 
         pygame.display.flip()
