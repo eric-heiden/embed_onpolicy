@@ -68,7 +68,7 @@ def main():
     print("Logging to %s." % log_folder)
     logger.configure(dir=log_folder,
                      format_strs=['stdout', 'log', 'csv', 'tensorboard'])
-    model, env = train(num_timesteps=1e5, seed=SEED, log_folder=log_folder)
+    model, env = train(num_timesteps=3e5, seed=SEED, log_folder=log_folder)
 
     logger.log("Running trained model")
     for _ in range(20):

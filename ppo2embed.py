@@ -23,42 +23,45 @@ class Model(object):
     def __init__(self, *, policy, ob_space, ac_space, task_space, latent_space, nbatch_act, nbatch_train,
                  nsteps, ent_coef, vf_coef, max_grad_norm):
         sess = tf.get_default_session()
+        with tf.variable_scope("PPO"):
+            act_model = policy(sess, ob_space, ac_space, task_space, latent_space, nbatch_act, 1, reuse=False, name="model")  # type: MlpEmbedPolicy
+            train_model = policy(sess, ob_space, ac_space, task_space, latent_space, nbatch_train, nsteps, reuse=True, name="model")  # type: MlpEmbedPolicy
 
-        act_model = policy(sess, ob_space, ac_space, task_space, latent_space, nbatch_act, 1, reuse=False)  # type: MlpEmbedPolicy
-        train_model = policy(sess, ob_space, ac_space, task_space, latent_space, nbatch_train, nsteps, reuse=True)  # type: MlpEmbedPolicy
+            A = tf.placeholder(dtype=tf.float32, shape=train_model.pd.batch_shape, name="A")
+            # A = train_model.pd.sample(name="A")
+            ADV = tf.placeholder(tf.float32, [None], name="ADV")
+            # ADV2 = tf.stack((ADV, ADV), axis=1, name="stacked_ADV")
+            R = tf.placeholder(tf.float32, [None], name="R")
+            OLDNEGLOGPAC = tf.placeholder(tf.float32, [None], name="OLDNEGLOGPAC")
+            OLDVPRED = tf.placeholder(tf.float32, [None], name="OLD_VPRED")
+            LR = tf.placeholder(tf.float32, [], name="LR")
+            CLIPRANGE = tf.placeholder(tf.float32, [], name="CLIP_RANGE")
 
-        A = train_model.pdtype.sample_placeholder([None])
-        ADV = tf.placeholder(tf.float32, [None])
-        R = tf.placeholder(tf.float32, [None])
-        OLDNEGLOGPAC = tf.placeholder(tf.float32, [None])
-        OLDVPRED = tf.placeholder(tf.float32, [None])
-        LR = tf.placeholder(tf.float32, [])
-        CLIPRANGE = tf.placeholder(tf.float32, [])
+            # neglogpac = train_model.pd.neglogp(A)
+            neglogpac = train_model.neg_log_prob(A, "train_A")
+            entropy = tf.reduce_mean(train_model.pd.entropy(), name="entropy")
 
-        neglogpac = train_model.pd.neglogp(A)
-        entropy = tf.reduce_mean(train_model.pd.entropy())
-
-        vpred = train_model.vf
-        vpredclipped = OLDVPRED + tf.clip_by_value(train_model.vf - OLDVPRED, -CLIPRANGE, CLIPRANGE, name="clip_vf")
-        vf_losses1 = tf.square(vpred - R)
-        vf_losses2 = tf.square(vpredclipped - R)
-        vf_loss = .5 * tf.reduce_mean(tf.maximum(vf_losses1, vf_losses2))
-        ratio = tf.exp(OLDNEGLOGPAC - neglogpac)
-        pg_losses = -ADV * ratio
-        pg_losses2 = -ADV * tf.clip_by_value(ratio, 1.0 - CLIPRANGE, 1.0 + CLIPRANGE)
-        pg_loss = tf.reduce_mean(tf.maximum(pg_losses, pg_losses2))
-        approxkl = .5 * tf.reduce_mean(tf.square(neglogpac - OLDNEGLOGPAC))
-        clipfrac = tf.reduce_mean(tf.to_float(tf.greater(tf.abs(ratio - 1.0), CLIPRANGE)))
-        loss = pg_loss - entropy * ent_coef + vf_loss * vf_coef
-        with tf.variable_scope('model'):
-            params = tf.trainable_variables()
-            print("TRAINABLE VARS", params)
-        grads = tf.gradients(loss, params)
-        if max_grad_norm is not None:
-            grads, _grad_norm = tf.clip_by_global_norm(grads, max_grad_norm)
-        grads = list(zip(grads, params))
-        trainer = tf.train.AdamOptimizer(learning_rate=LR, epsilon=1e-5)
-        _train = trainer.apply_gradients(grads)
+            vpred = train_model.vf
+            vpredclipped = OLDVPRED + tf.clip_by_value(train_model.vf - OLDVPRED, -CLIPRANGE, CLIPRANGE, name="clip_vf")
+            vf_losses1 = tf.square(vpred - R)
+            vf_losses2 = tf.square(vpredclipped - R)
+            vf_loss = .5 * tf.reduce_mean(tf.maximum(vf_losses1, vf_losses2))
+            ratio = tf.exp(OLDNEGLOGPAC - neglogpac)
+            pg_losses = -ADV * ratio
+            pg_losses2 = -ADV * tf.clip_by_value(ratio, 1.0 - CLIPRANGE, 1.0 + CLIPRANGE)
+            pg_loss = tf.reduce_mean(tf.maximum(pg_losses, pg_losses2))
+            approxkl = .5 * tf.reduce_mean(tf.square(neglogpac - OLDNEGLOGPAC))
+            clipfrac = tf.reduce_mean(tf.to_float(tf.greater(tf.abs(ratio - 1.0), CLIPRANGE)), name="clip_frac")
+            loss = pg_loss - entropy * ent_coef + vf_loss * vf_coef
+            with tf.variable_scope('model'):
+                params = tf.trainable_variables()
+                print("TRAINABLE VARS", params)
+            grads = tf.gradients(loss, params)
+            if max_grad_norm is not None:
+                grads, _grad_norm = tf.clip_by_global_norm(grads, max_grad_norm, name="grads")
+            grads = list(zip(grads, params))
+            trainer = tf.train.AdamOptimizer(learning_rate=LR, epsilon=1e-5, name="adam_opt")
+            _train = trainer.apply_gradients(grads)
 
         # obs, tasks, returns, masks, actions, values, neglogpacs
         def train(lr, cliprange, obs, tasks, returns, masks, actions, values, neglogpacs, states=None):
@@ -146,7 +149,7 @@ class Runner(object):
             actions, values, mb_states, neglogpacs = self.model.step_from_task(
                 self.onehots, self.obs, self.states, self.dones)
             mb_obs.append(self.obs.copy())
-            actions = np.clip(actions, self.model.action_space.low[0], self.model.action_space.high[0])
+            # actions = np.clip(actions, self.model.action_space.low[0], self.model.action_space.high[0])
             mb_actions.append(actions)
             mb_values.append(values)
             mb_neglogpacs.append(neglogpacs)
@@ -244,6 +247,8 @@ def constfn(val):
 
 
 def safemean(xs):
+    if len(xs) == 0:
+        return np.nan
     return np.nan if len(xs) == 0 else np.mean(xs)
 
 
@@ -295,14 +300,15 @@ def visualize(model: Model, env: DummyVecEnv, update: int, plot_folder: str):
                 # actions, values, mb_states, neglogpacs = self.model.step(self.latents, self.obs, self.states, self.dones)
                 actions, values, mb_states, neglogpacs = model.step_from_task(
                     onehots, obs, model.initial_state, dones)
-                actions = np.clip(actions, model.action_space.low[0], model.action_space.high[0])
+                # actions = np.clip(actions, model.action_space.low[0], model.action_space.high[0])
                 obs[:], rewards, dones, infos = env.step(actions)
-                positions.append(np.copy(obs[0]))
                 if dones[-1]:
                     break
+                else:
+                    positions.append(np.copy(obs[0]))
             positions = np.array(positions)
-            ax.scatter(positions[:, 0], positions[:, 1], color=colormap(sample * 1. / nsamples), s=2)
-            ax.plot(positions[:, 0], positions[:, 1], color=colormap(sample * 1. / nsamples))
+            ax.scatter(positions[:, 0], positions[:, 1], color=colormap(sample * 1. / nsamples), s=2, zorder=2)
+            ax.plot(positions[:, 0], positions[:, 1], color=colormap(sample * 1. / nsamples), zorder=2)
 
         # visualize latents TODO make actions dependent on these
         ax = axes[1][t]

@@ -66,10 +66,10 @@ class MlpPolicy(object):
 
 class MlpEmbedPolicy(object):
     def __init__(self, sess: tf.Session, ob_space: Box, ac_space: Box, task_space: Box, latent_space: Box,
-                 nbatch, nsteps, reuse=False):
+                 nbatch, nsteps, reuse=False, name="model"):
 
-        self.pdtype = make_pdtype(ac_space)
-        with tf.variable_scope("model", reuse=reuse):
+        # self.pdtype = make_pdtype(ac_space)
+        with tf.variable_scope(name, reuse=reuse):
 
             # task input
             Task, processed_t = space_input(task_space, nbatch, name="task")
@@ -80,7 +80,7 @@ class MlpEmbedPolicy(object):
             # em_h2 = tf.tanh(fc(em_h1, 'embed_fc2', nh=latent_space.shape[0], init_scale=0.5), name="em_h2")
 
             # embedding variable
-            Embedding = Task  # tf.Variable(tf.zeros((nbatch,) + latent_space.shape), dtype=latent_space.dtype, name="embedding")
+            Embedding = processed_t  # tf.Variable(tf.zeros((nbatch,) + latent_space.shape), dtype=latent_space.dtype, name="embedding")
             # tf.assign(Embedding, em_h2, name="embedding_from_task")
 
             # observation input
@@ -92,7 +92,7 @@ class MlpEmbedPolicy(object):
 
             # policy
             pi_h1 = tf.tanh(fc(em_ob, 'pi_fc1', nh=16, init_scale=np.sqrt(2)), name="pi_h1")
-            pi_h2 = tf.tanh(fc(pi_h1, 'pi_fc2', nh=16, init_scale=np.sqrt(2)), name="pi_h2")
+            pi_h2 = tf.tanh(fc(pi_h1, 'pi_fc2', nh=16, init_scale=1.), name="pi_h2")
             # pi_h2 = tf.clip_by_value(pi_h2, ac_space.low[0], ac_space.high[0])
 
             # value function
@@ -100,10 +100,29 @@ class MlpEmbedPolicy(object):
             vf_h2 = tf.tanh(fc(vf_h1, 'vf_fc2', nh=16, init_scale=np.sqrt(2)), name="vf_h2")
             vf = fc(vf_h2, 'vf', 1)[:, 0]
 
-            self.pd, self.pi = self.pdtype.pdfromlatent(pi_h2, init_scale=0.01)
+            # mean = fc(pi_h2, 'pi', ac_space.shape[0], init_scale=0.01, init_bias=0.)
+            # logstd = tf.get_variable(name='logstd', shape=[1, ac_space.shape[0]],
+            #                          initializer=tf.zeros_initializer(), trainable=True)
+            # std = tf.exp(logstd)
+            # self.pd = tf.distributions.Normal(mean, std, allow_nan_stats=False)
 
-        a0 = self.pd.sample()  # tf.clip_by_value(self.pd.sample(), ac_space.low[0], ac_space.high[0])
-        neglogp0 = self.pd.neglogp(a0)
+            alpha = tf.sigmoid(fc(pi_h2, 'pi_alpha1', ac_space.shape[0], init_scale=np.sqrt(2), init_bias=2.), name='pi_alpha')
+            beta = tf.sigmoid(fc(pi_h2, 'pi_beta1', ac_space.shape[0], init_scale=np.sqrt(2), init_bias=2.), name='pi_beta')
+            # beta = tf.sigmoid(tf.get_variable(name='pi_beta1', shape=[1, ac_space.shape[0]],
+            #                               initializer=tf.constant_initializer(np.sqrt(2)), trainable=True), name='pi_beta')
+            self.pd = tf.distributions.Beta(alpha + 0.001, beta + 0.001, validate_args=True, name="Beta")
+
+        a0 = self.pd.sample(name="a0")  # tf.clip_by_value(self.pd.sample(), ac_space.low[0], ac_space.high[0])
+
+        l, h = ac_space.low[0], ac_space.high[0]
+        a0 = a0 * (h - l) + l
+
+        def neg_log_prob(var: tf.Tensor, var_name="var"):
+            return -tf.reduce_sum(self.pd.log_prob(tf.sigmoid(var) * 0.98 + 0.01), axis=-1, name="neg_log_prob_%s" % var_name)
+            # return -tf.reduce_sum(self.pd.log_prob(var), axis=-1, name="neg_log_prob_%s" % var_name)
+
+        neglogp0 = neg_log_prob(a0, "a0")
+        # a0 = a0 * (h - l) + l
         self.initial_state = None
 
         def step(latent, ob, *_args, **_kwargs):
@@ -129,3 +148,4 @@ class MlpEmbedPolicy(object):
         self.step_from_task = step_from_task
         self.value = value
         self.value_from_task = value_from_task
+        self.neg_log_prob = neg_log_prob

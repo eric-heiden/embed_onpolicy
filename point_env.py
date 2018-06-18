@@ -21,6 +21,8 @@ TASKS = [(3, 0), (-3, 0)]  # (0, 3), (-3, 0), (0, -3)]
 
 MIN_DIST = 1.5
 
+ACTION_LIMIT = 0.2
+
 
 class PointEnv(gym.Env):
     def __init__(self, show_traces=True):
@@ -43,7 +45,7 @@ class PointEnv(gym.Env):
 
     @property
     def action_space(self):
-        return gym.spaces.Box(low=-0.1, high=0.1, shape=(2,))
+        return gym.spaces.Box(low=-ACTION_LIMIT, high=ACTION_LIMIT, shape=(2,))
 
     @property
     def task(self):
@@ -58,6 +60,8 @@ class PointEnv(gym.Env):
         return np.copy(self._point)
 
     def step(self, action):
+        l, h = -ACTION_LIMIT, ACTION_LIMIT
+        # action = action * (h - l) + l
         self._point = self._point + action
         self._traces[-1].append(tuple(self._point))
         self._step += 1
