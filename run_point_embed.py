@@ -19,7 +19,10 @@ from policies import MlpEmbedPolicy
 import ppo2embed
 
 
-SEED = 123
+SEED = 1234
+
+# use Beta distribution for policy, Gaussian otherwise
+USE_BETA = True
 
 
 def train(num_timesteps, seed, log_folder):
@@ -30,23 +33,22 @@ def train(num_timesteps, seed, log_folder):
     tf.Session(config=config).__enter__()
 
     task_space = gym.spaces.Box(low=0, high=1, shape=(len(TASKS),))
-    latent_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(len(TASKS),))  # XXX same size as task space!!!
+    latent_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(4,))
 
     def make_env():
         env = PointEnv()
-        # env = bench.Monitor(env, logger.get_dir(), allow_early_resets=True, info_keywords=("episode",))
         return env
 
     env = DummyVecEnv([make_env])
     # env = VecNormalize(env, ob=True, ret=False, cliprew=200)
 
     set_global_seeds(seed)
-    policy = MlpEmbedPolicy
+    policy = lambda *args, **kwargs: MlpEmbedPolicy(*args, **kwargs, use_beta=USE_BETA)
     model = ppo2embed.learn(policy=policy,
                             env=env,
                             task_space=task_space,
                             latent_space=latent_space,
-                            nsteps=100,
+                            nsteps=500,
                             nminibatches=5,
                             lam=0.95,
                             gamma=0.99,
@@ -68,7 +70,7 @@ def main():
     print("Logging to %s." % log_folder)
     logger.configure(dir=log_folder,
                      format_strs=['stdout', 'log', 'csv', 'tensorboard'])
-    model, env = train(num_timesteps=3e5, seed=SEED, log_folder=log_folder)
+    model, env = train(num_timesteps=1e6, seed=SEED, log_folder=log_folder)
 
     logger.log("Running trained model")
     for _ in range(20):

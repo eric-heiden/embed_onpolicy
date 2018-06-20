@@ -112,12 +112,14 @@ class Model(object):
         self.latent_space = latent_space
         self.action_space = ac_space
         self.observation_space = ob_space
+
+        self.use_beta = act_model.use_beta
         tf.global_variables_initializer().run(session=sess)  # pylint: disable=E1101
 
 
 class Runner(object):
 
-    def __init__(self, *, env: DummyVecEnv, model: Model, nsteps, gamma, lam):
+    def __init__(self, *, env: DummyVecEnv, model: Model, nsteps, gamma, lam, max_length: int = 20):
         self.env = env
         self.model = model
         nenv = env.num_envs
@@ -137,13 +139,15 @@ class Runner(object):
 
         self.lam = lam
         self.gamma = gamma
+        self.max_length = max_length
 
     def run(self):
         mb_obs, mb_rewards, mb_actions, mb_latents, mb_tasks, mb_values, mb_dones, mb_neglogpacs = \
             [], [], [], [], [], [], [], []
         mb_states = self.states
         epinfos = []
-        for _ in range(self.nsteps):
+        completions = 0
+        for step in range(self.nsteps):
             # self.latents = [self.model.get_latent(t) for t in self.tasks]
             # actions, values, mb_states, neglogpacs = self.model.step(self.latents, self.obs, self.states, self.dones)
             actions, values, mb_states, neglogpacs = self.model.step_from_task(
@@ -171,17 +175,28 @@ class Runner(object):
 
             epinfos += [info["episode"] for info in infos]
 
-            if "t" in infos[-1]["episode"] or self.dones[0]:
+            if any(self.dones) or step % self.max_length == 0:
+                if step % self.max_length == 0:
+                    self.obs[:] = self.env.reset()
                 # handle malicious sum(rewards) from gym.Monitor
                 # print("DONE", rewards)
-                self.obs[:] = self.env.reset()
+
+                # VecEnv resets environment already
+                # self.obs[:] = self.env.reset()
+
+                # for e in self.env.envs:
+                #     e._task += 1
+                #     e._task = self.model.task_space.shape[0] % self.model.task_space.shape[0]
+                #     e._goal = point_env.TASKS[e._task]
                 self.tasks = [e.task for e in self.env.envs]
                 self.onehots = []
                 for task in self.tasks:
                     one_hot = np.zeros((self.model.task_space.shape[0],))
                     one_hot[task] = 1
-                    self.onehots.append(one_hot)
+                    self.onehots.append(np.copy(one_hot))
                 self.latents = [self.model.get_latent(t) for t in self.tasks]
+
+                completions += 1
 
             # mb_obs.append(self.obs.copy())
             # mb_actions.append(actions)
@@ -208,6 +223,7 @@ class Runner(object):
         last_values = self.model.value_from_task(self.onehots, self.obs, self.states, self.dones)
 
         print("MEAN reward:", np.mean(mb_rewards))
+        completion_ratio = completions * 1. / self.nsteps
 
         # discount/bootstrap off value fn
         mb_returns = np.zeros_like(mb_rewards)
@@ -227,7 +243,7 @@ class Runner(object):
         mb_returns = mb_advs + mb_values
 
         return (*map(sf01, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs)),
-                mb_tasks, mb_latents, mb_states, epinfos)
+                mb_tasks, mb_latents, mb_states, epinfos, completion_ratio)
 
 
 # obs, returns, masks, actions, values, neglogpacs, states = runner.run()
@@ -264,10 +280,10 @@ def visualize(model: Model, env: DummyVecEnv, update: int, plot_folder: str):
     nsteps = 40
     nsamples = 10
     ntasks = len(point_env.TASKS)
-    colormap = matplotlib.cm.get_cmap("winter")
+    colormap = lambda x: matplotlib.cm.get_cmap("winter")(1.-x)
 
     fig, axes = plt.subplots(figsize=(ntasks * 4, 8), nrows=2, ncols=ntasks, sharey='row')
-    fig.suptitle('Iteration %i' % update)
+    fig.suptitle(('Iteration %i' % update) + (' (using %s distribution)' % ('Normal', 'Beta')[int(model.use_beta)]))
     if ntasks == 1:
         axes = [[axes[0]], [axes[1]]]
     for t in range(ntasks):
@@ -293,20 +309,22 @@ def visualize(model: Model, env: DummyVecEnv, update: int, plot_folder: str):
                 pointEnv._task = t  # TODO expose via setter
                 pointEnv._goal = point_env.TASKS[t]
             dones = [False for _ in range(nenv)]
-            positions = []
+            positions = [np.copy(obs[0])]
 
             for _ in range(nsteps):
                 # self.latents = [self.model.get_latent(t) for t in self.tasks]
                 # actions, values, mb_states, neglogpacs = self.model.step(self.latents, self.obs, self.states, self.dones)
                 actions, values, mb_states, neglogpacs = model.step_from_task(
                     onehots, obs, model.initial_state, dones)
+                if not model.use_beta:
+                    actions *= 0.1
                 # actions = np.clip(actions, model.action_space.low[0], model.action_space.high[0])
                 obs[:], rewards, dones, infos = env.step(actions)
+                positions.append(np.copy(obs[0]))
                 if dones[-1]:
                     break
-                else:
-                    positions.append(np.copy(obs[0]))
             positions = np.array(positions)
+            positions = np.reshape(positions, (-1, 2))
             ax.scatter(positions[:, 0], positions[:, 1], color=colormap(sample * 1. / nsamples), s=2, zorder=2)
             ax.plot(positions[:, 0], positions[:, 1], color=colormap(sample * 1. / nsamples), zorder=2)
 
@@ -373,7 +391,7 @@ def learn(*, policy, env, task_space, latent_space, nsteps, total_timesteps, ent
         frac = 1.0 - (update - 1.0) / nupdates
         lrnow = lr(frac)
         cliprangenow = cliprange(frac)
-        obs, returns, masks, actions, values, neglogpacs, tasks, latents, states, epinfos = runner.run()
+        obs, returns, masks, actions, values, neglogpacs, tasks, latents, states, epinfos, completion_ratio = runner.run()
         epinfobuf.extend(epinfos)
         mblossvals = []
         if states is None:  # nonrecurrent version
@@ -412,9 +430,12 @@ def learn(*, policy, env, task_space, latent_space, nsteps, total_timesteps, ent
             logger.logkv("nupdates", update)
             logger.logkv("total_timesteps", update * nbatch)
             logger.logkv("fps", fps)
+            logger.logkv("completion_ratio", completion_ratio)
             logger.logkv("explained_variance", float(ev))
             logger.logkv('eprewmean', safemean([epinfo['r'] for epinfo in epinfobuf]))
             logger.logkv('eplenmean', safemean([epinfo['l'] for epinfo in epinfobuf]))
+            for t in range(task_space.shape[0]):
+                logger.logkv("sampled_task%i" % t, np.sum(tasks[:, t]))
             logger.logkv('time_elapsed', tnow - tfirststart)
             for (lossval, lossname) in zip(lossvals, model.loss_names):
                 logger.logkv(lossname, lossval)

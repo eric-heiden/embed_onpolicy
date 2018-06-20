@@ -17,9 +17,9 @@ TRACE_COLORS = [
 BRIGHT_COLOR = (200, 200, 200)
 DARK_COLOR = (150, 150, 150)
 
-TASKS = [(3, 0), (-3, 0)]  # (0, 3), (-3, 0), (0, -3)]
+TASKS = [(3, 0), (0, 3), (-3, 0), (0, -3)]
 
-MIN_DIST = 1.5
+MIN_DIST = 0.5
 
 ACTION_LIMIT = 0.2
 
@@ -60,7 +60,7 @@ class PointEnv(gym.Env):
         return np.copy(self._point)
 
     def step(self, action):
-        l, h = -ACTION_LIMIT, ACTION_LIMIT
+        # l, h = -ACTION_LIMIT, ACTION_LIMIT
         # action = action * (h - l) + l
         self._point = self._point + action
         self._traces[-1].append(tuple(self._point))
@@ -72,7 +72,7 @@ class PointEnv(gym.Env):
 
         # completion bonus
         if done and distance < MIN_DIST:
-            reward = 2000.0
+            reward = 200.0
 
         onehot = np.zeros(len(TASKS))
         onehot[self._task] = 1
