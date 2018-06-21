@@ -19,10 +19,10 @@ from policies import MlpEmbedPolicy
 import ppo2embed
 
 
-SEED = 1234
+SEED = 12345
 
 # use Beta distribution for policy, Gaussian otherwise
-USE_BETA = True
+USE_BETA = False
 
 
 def train(num_timesteps, seed, log_folder):
@@ -33,7 +33,7 @@ def train(num_timesteps, seed, log_folder):
     tf.Session(config=config).__enter__()
 
     task_space = gym.spaces.Box(low=0, high=1, shape=(len(TASKS),))
-    latent_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(4,))
+    latent_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(2,))
 
     def make_env():
         env = PointEnv()
@@ -54,9 +54,10 @@ def train(num_timesteps, seed, log_folder):
                             gamma=0.99,
                             noptepochs=10,
                             log_interval=1,
-                            ent_coef=0.0,
+                            ent_coef=0.1,
                             lr=3e-4,
                             cliprange=0.2,
+                            seed=seed,
                             total_timesteps=num_timesteps,
                             plot_folder=osp.join(log_folder, "plots"),
                             log_folder=log_folder)

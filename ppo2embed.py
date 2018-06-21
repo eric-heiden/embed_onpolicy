@@ -21,69 +21,90 @@ from baselines.common.vec_env.vec_normalize import VecNormalize
 
 class Model(object):
     def __init__(self, *, policy, ob_space, ac_space, task_space, latent_space, nbatch_act, nbatch_train,
-                 nsteps, ent_coef, vf_coef, max_grad_norm):
+                 nsteps, policy_entropy, vf_coef, max_grad_norm, embedding_entropy=0., seed=None):
         sess = tf.get_default_session()
         with tf.variable_scope("PPO"):
-            act_model = policy(sess, ob_space, ac_space, task_space, latent_space, nbatch_act, 1, reuse=False, name="model")  # type: MlpEmbedPolicy
-            train_model = policy(sess, ob_space, ac_space, task_space, latent_space, nbatch_train, nsteps, reuse=True, name="model")  # type: MlpEmbedPolicy
+            act_model = policy(sess, ob_space, ac_space, task_space, latent_space, nbatch_act, 1, reuse=False, seed=seed, name="model")  # type: MlpEmbedPolicy
+            train_model = policy(sess, ob_space, ac_space, task_space, latent_space, nbatch_train, nsteps, reuse=True, seed=seed, name="model")  # type: MlpEmbedPolicy
 
-            A = tf.placeholder(dtype=tf.float32, shape=train_model.pd.batch_shape, name="A")
+            A = tf.placeholder(dtype=tf.float32, shape=train_model.pd.batch_shape, name="actions")
             # A = train_model.pd.sample(name="A")
-            ADV = tf.placeholder(tf.float32, [None], name="ADV")
+            ADV = tf.placeholder(tf.float32, [None], name="advantages")
             # ADV2 = tf.stack((ADV, ADV), axis=1, name="stacked_ADV")
-            R = tf.placeholder(tf.float32, [None], name="R")
-            OLDNEGLOGPAC = tf.placeholder(tf.float32, [None], name="OLDNEGLOGPAC")
-            OLDVPRED = tf.placeholder(tf.float32, [None], name="OLD_VPRED")
-            LR = tf.placeholder(tf.float32, [], name="LR")
-            CLIPRANGE = tf.placeholder(tf.float32, [], name="CLIP_RANGE")
+            R = tf.placeholder(tf.float32, [None], name="returns")
+            OLDNEGLOGPAC = tf.placeholder(tf.float32, [None], name="old_neglogpac")
+            OLDVPRED = tf.placeholder(tf.float32, [None], name="old_vpred")
+            LR = tf.placeholder(tf.float32, [], name="learning_rate")
+            CLIPRANGE = tf.placeholder(tf.float32, [], name="clip_range")
 
             # neglogpac = train_model.pd.neglogp(A)
-            neglogpac = train_model.neg_log_prob(A, "train_A")
+            neglogpac = train_model.neg_log_prob(A, "neglogpac")
             entropy = tf.reduce_mean(train_model.pd.entropy(), name="entropy")
 
-            vpred = train_model.vf
-            vpredclipped = OLDVPRED + tf.clip_by_value(train_model.vf - OLDVPRED, -CLIPRANGE, CLIPRANGE, name="clip_vf")
-            vf_losses1 = tf.square(vpred - R)
-            vf_losses2 = tf.square(vpredclipped - R)
-            vf_loss = .5 * tf.reduce_mean(tf.maximum(vf_losses1, vf_losses2))
-            ratio = tf.exp(OLDNEGLOGPAC - neglogpac)
-            pg_losses = -ADV * ratio
-            pg_losses2 = -ADV * tf.clip_by_value(ratio, 1.0 - CLIPRANGE, 1.0 + CLIPRANGE)
-            pg_loss = tf.reduce_mean(tf.maximum(pg_losses, pg_losses2))
-            approxkl = .5 * tf.reduce_mean(tf.square(neglogpac - OLDNEGLOGPAC))
-            clipfrac = tf.reduce_mean(tf.to_float(tf.greater(tf.abs(ratio - 1.0), CLIPRANGE)), name="clip_frac")
-            loss = pg_loss - entropy * ent_coef + vf_loss * vf_coef
-            with tf.variable_scope('model'):
+            with tf.name_scope("ValueFunction"):
+                vpred = train_model.vf
+                vpredclipped = tf.identity(OLDVPRED + tf.clip_by_value(train_model.vf - OLDVPRED, -CLIPRANGE, CLIPRANGE, name="clip_vf"), name="vpred_clipped")
+                vf_losses1 = tf.square(vpred - R, name="vf_loss1")
+                vf_losses2 = tf.square(vpredclipped - R, name="vf_loss2")
+                vf_loss = tf.identity(.5 * tf.reduce_mean(tf.maximum(vf_losses1, vf_losses2)), name="vf_loss")
+
+            with tf.name_scope("PolicyGradient"):
+                ratio = tf.exp(OLDNEGLOGPAC - neglogpac, name="nlp_ratio")
+                pg_losses = tf.identity(-ADV * ratio, name="pg_loss1")
+                pg_losses2 = tf.identity(-ADV * tf.clip_by_value(ratio, 1.0 - CLIPRANGE, 1.0 + CLIPRANGE), name="pg_loss2")
+                pg_loss = tf.reduce_mean(tf.maximum(pg_losses, pg_losses2), name="pg_loss")
+                approxkl = tf.identity(.5 * tf.reduce_mean(tf.square(neglogpac - OLDNEGLOGPAC)), name="approx_kl")
+                clipfrac = tf.reduce_mean(tf.to_float(tf.greater(tf.abs(ratio - 1.0), CLIPRANGE)), name="clip_frac")
+                loss = tf.identity(pg_loss + vf_loss * vf_coef, name="policy_loss")
+
+                final_loss = tf.identity(loss
+                                         - policy_entropy * entropy
+                                         - embedding_entropy * train_model.embedding_entropy,
+                             name="final_loss")
+
+            with tf.variable_scope('model', reuse=True):
                 params = tf.trainable_variables()
                 print("TRAINABLE VARS", params)
-            grads = tf.gradients(loss, params)
-            if max_grad_norm is not None:
-                grads, _grad_norm = tf.clip_by_global_norm(grads, max_grad_norm, name="grads")
-            grads = list(zip(grads, params))
-            trainer = tf.train.AdamOptimizer(learning_rate=LR, epsilon=1e-5, name="adam_opt")
-            _train = trainer.apply_gradients(grads)
+
+            with tf.name_scope("Training"):
+                grads = tf.gradients(final_loss, params)
+                if max_grad_norm is not None:
+                    grads, _grad_norm = tf.clip_by_global_norm(grads, max_grad_norm, name="clipped_grads")
+                grads = list(zip(grads, params))
+                trainer = tf.train.AdamOptimizer(learning_rate=LR, epsilon=1e-5, name="adam_opt")
+                _train = trainer.apply_gradients(grads)
 
         # obs, tasks, returns, masks, actions, values, neglogpacs
-        def train(lr, cliprange, obs, tasks, returns, masks, actions, values, neglogpacs, states=None):
+        def train(lr, cliprange, obs, tasks, returns, masks, actions, values, neglogpacs, latents, states=None):
             advs = returns - values
             advs = (advs - advs.mean()) / (advs.std() + 1e-8)
-            td_map = {train_model.Observation: obs, train_model.Task: tasks, A: actions, ADV: advs, R: returns, LR: lr,
-                      CLIPRANGE: cliprange, OLDNEGLOGPAC: neglogpacs, OLDVPRED: values}
+            td_map = {
+                train_model.Observation: obs,
+                train_model.Task: tasks,
+                A: actions,
+                ADV: advs,
+                R: returns,
+                LR: lr,
+                CLIPRANGE: cliprange,
+                OLDNEGLOGPAC: neglogpacs,
+                OLDVPRED: values,
+                # train_model.Embedding: latents
+            }
             if states is not None:
                 td_map[train_model.S] = states
                 td_map[train_model.M] = masks
             return sess.run(
-                [pg_loss, vf_loss, entropy, approxkl, clipfrac, _train],
+                [pg_loss, vf_loss, approxkl, clipfrac, entropy, train_model.embedding_entropy, final_loss, _train],
                 td_map
             )[:-1]
 
         def get_latent(task: int):
-            one_hot = np.zeros((1, task_space.shape[0]))
-            one_hot[0][task] = 1
+            one_hot = np.zeros(act_model.Task.shape)
+            one_hot[:, task] = 1
             latent = sess.run(act_model.Embedding, {act_model.Task: one_hot})
             return latent[0]
 
-        self.loss_names = ['policy_loss', 'value_loss', 'policy_entropy', 'approxkl', 'clipfrac']
+        self.loss_names = ['policy_loss', 'value_loss', 'approxkl', 'clipfrac', 'policy_entropy', 'embedding_entropy', 'final_loss']
 
         def save(save_path):
             ps = sess.run(params)
@@ -148,10 +169,10 @@ class Runner(object):
         epinfos = []
         completions = 0
         for step in range(self.nsteps):
-            # self.latents = [self.model.get_latent(t) for t in self.tasks]
-            # actions, values, mb_states, neglogpacs = self.model.step(self.latents, self.obs, self.states, self.dones)
-            actions, values, mb_states, neglogpacs = self.model.step_from_task(
-                self.onehots, self.obs, self.states, self.dones)
+            self.latents = [self.model.get_latent(t) for t in self.tasks]
+            actions, values, mb_states, neglogpacs = self.model.step(self.latents, self.obs, self.states, self.dones)
+            # actions, values, mb_states, neglogpacs = self.model.step_from_task(
+            #     self.onehots, self.obs, self.states, self.dones)
             mb_obs.append(self.obs.copy())
             # actions = np.clip(actions, self.model.action_space.low[0], self.model.action_space.high[0])
             mb_actions.append(actions)
@@ -242,8 +263,8 @@ class Runner(object):
 
         mb_returns = mb_advs + mb_values
 
-        return (*map(sf01, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs)),
-                mb_tasks, mb_latents, mb_states, epinfos, completion_ratio)
+        return (*map(sf01, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, mb_latents)),
+                mb_tasks, mb_states, epinfos, completion_ratio)
 
 
 # obs, returns, masks, actions, values, neglogpacs, states = runner.run()
@@ -302,6 +323,11 @@ def visualize(model: Model, env: DummyVecEnv, update: int, plot_folder: str):
         ax.add_patch(goal)
         # ax.scatter([point_env.TASKS[t][0]], [point_env.TASKS[t][1]], s=50, c='r')
 
+        ax_latent = axes[1][t]
+        ax_latent.grid()
+        ticks = np.arange(0, model.latent_space.shape[0], 1)
+        ax_latent.set_xticks(ticks)
+
         for sample in range(nsamples):
             obs = np.zeros((nenv,) + env.observation_space.shape, dtype=env.observation_space.dtype.name)
             obs[:] = env.reset()
@@ -311,11 +337,11 @@ def visualize(model: Model, env: DummyVecEnv, update: int, plot_folder: str):
             dones = [False for _ in range(nenv)]
             positions = [np.copy(obs[0])]
 
+            latents = [model.get_latent(t)]
             for _ in range(nsteps):
-                # self.latents = [self.model.get_latent(t) for t in self.tasks]
-                # actions, values, mb_states, neglogpacs = self.model.step(self.latents, self.obs, self.states, self.dones)
-                actions, values, mb_states, neglogpacs = model.step_from_task(
-                    onehots, obs, model.initial_state, dones)
+                actions, values, mb_states, neglogpacs = model.step(latents, obs, model.initial_state, dones)
+                # actions, values, mb_states, neglogpacs = model.step_from_task(
+                #     onehots, obs, model.initial_state, dones)
                 if not model.use_beta:
                     actions *= 0.1
                 # actions = np.clip(actions, model.action_space.low[0], model.action_space.high[0])
@@ -328,14 +354,8 @@ def visualize(model: Model, env: DummyVecEnv, update: int, plot_folder: str):
             ax.scatter(positions[:, 0], positions[:, 1], color=colormap(sample * 1. / nsamples), s=2, zorder=2)
             ax.plot(positions[:, 0], positions[:, 1], color=colormap(sample * 1. / nsamples), zorder=2)
 
-        # visualize latents TODO make actions dependent on these
-        ax = axes[1][t]
-        ax.grid()
-        ticks = np.arange(0, model.latent_space.shape[0], 1)
-        ax.set_xticks(ticks)
-        for sample in range(nsamples):
-            latent = model.get_latent(t)
-            ax.scatter(ticks, latent, color=colormap(sample * 1. / nsamples))
+            # visualize latents TODO make actions dependent on these
+            ax_latent.scatter(ticks, latents, color=colormap(sample * 1. / nsamples))
 
     fig.tight_layout(rect=[0, 0.03, 1, 0.95])
     fig.savefig(osp.join(plot_folder, 'embed_%05d.png' % update))
@@ -343,7 +363,7 @@ def visualize(model: Model, env: DummyVecEnv, update: int, plot_folder: str):
 
 def learn(*, policy, env, task_space, latent_space, nsteps, total_timesteps, ent_coef, lr,
           vf_coef=0.5, max_grad_norm=0.5, gamma=0.99, lam=0.95,
-          log_interval=10, nminibatches=4, noptepochs=4, cliprange=0.2,
+          log_interval=10, nminibatches=4, noptepochs=4, cliprange=0.2, seed=None,
           save_interval=0, load_path=None, plot_interval=50, plot_folder=None, log_folder=None):
     if isinstance(lr, float):
         lr = constfn(lr)
@@ -369,8 +389,8 @@ def learn(*, policy, env, task_space, latent_space, nsteps, total_timesteps, ent
                                task_space=task_space, latent_space=latent_space,
                                nbatch_act=nenvs,
                                nbatch_train=nbatch_train,
-                               nsteps=nsteps, ent_coef=ent_coef, vf_coef=vf_coef,
-                               max_grad_norm=max_grad_norm)
+                               nsteps=nsteps, policy_entropy=ent_coef, vf_coef=vf_coef,
+                               max_grad_norm=max_grad_norm, seed=seed)
     if save_interval and logger.get_dir():
         import cloudpickle
         with open(osp.join(logger.get_dir(), 'make_model.pkl'), 'wb') as fh:
@@ -391,7 +411,7 @@ def learn(*, policy, env, task_space, latent_space, nsteps, total_timesteps, ent
         frac = 1.0 - (update - 1.0) / nupdates
         lrnow = lr(frac)
         cliprangenow = cliprange(frac)
-        obs, returns, masks, actions, values, neglogpacs, tasks, latents, states, epinfos, completion_ratio = runner.run()
+        obs, returns, masks, actions, values, neglogpacs, latents, tasks, states, epinfos, completion_ratio = runner.run()
         epinfobuf.extend(epinfos)
         mblossvals = []
         if states is None:  # nonrecurrent version
@@ -403,7 +423,7 @@ def learn(*, policy, env, task_space, latent_space, nsteps, total_timesteps, ent
                     mbinds = inds[start:end]
                     # print("mbinds", mbinds)
                     # print("tasks", tasks.shape)
-                    slices = (arr[mbinds] for arr in (obs, tasks, returns, masks, actions, values, neglogpacs))
+                    slices = (arr[mbinds] for arr in (obs, tasks, returns, masks, actions, values, neglogpacs, latents))
                     mblossvals.append(model.train(lrnow, cliprangenow, *slices))
         # else:  # recurrent version
         #     assert nenvs % nminibatches == 0
@@ -427,18 +447,18 @@ def learn(*, policy, env, task_space, latent_space, nsteps, total_timesteps, ent
         if update % log_interval == 0 or update == 1:
             ev = explained_variance(values, returns)
             logger.logkv("serial_timesteps", update * nsteps)
-            logger.logkv("nupdates", update)
-            logger.logkv("total_timesteps", update * nbatch)
+            # logger.logkv("nupdates", update)
+            # logger.logkv("total_timesteps", update * nbatch)
             logger.logkv("fps", fps)
             logger.logkv("completion_ratio", completion_ratio)
             logger.logkv("explained_variance", float(ev))
-            logger.logkv('eprewmean', safemean([epinfo['r'] for epinfo in epinfobuf]))
-            logger.logkv('eplenmean', safemean([epinfo['l'] for epinfo in epinfobuf]))
+            logger.logkv("episode/reward", safemean([epinfo['r'] for epinfo in epinfobuf]))
+            logger.logkv("episode/length", safemean([epinfo['l'] for epinfo in epinfobuf]))
             for t in range(task_space.shape[0]):
-                logger.logkv("sampled_task%i" % t, np.sum(tasks[:, t]))
+                logger.logkv("sampled_task/%i" % t, np.sum(tasks[:, t]))
             logger.logkv('time_elapsed', tnow - tfirststart)
             for (lossval, lossname) in zip(lossvals, model.loss_names):
-                logger.logkv(lossname, lossval)
+                logger.logkv("loss/%s" % lossname, lossval)
             logger.dumpkvs()
             if update == 1 and log_folder is not None:
                 # save graph to visualize in TensorBoard

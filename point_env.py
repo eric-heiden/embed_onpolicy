@@ -67,7 +67,7 @@ class PointEnv(gym.Env):
         self._step += 1
 
         distance = np.linalg.norm(self._point - self._goal)
-        done = distance < MIN_DIST or distance > 20
+        done = distance < MIN_DIST # or distance > 20
         reward = -distance
 
         # completion bonus
