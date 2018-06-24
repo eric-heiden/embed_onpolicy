@@ -22,7 +22,7 @@ import ppo2embed
 SEED = 12345
 
 # use Beta distribution for policy, Gaussian otherwise
-USE_BETA = False
+USE_BETA = True
 
 
 def train(num_timesteps, seed, log_folder):
@@ -33,7 +33,7 @@ def train(num_timesteps, seed, log_folder):
     tf.Session(config=config).__enter__()
 
     task_space = gym.spaces.Box(low=0, high=1, shape=(len(TASKS),))
-    latent_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(2,))
+    latent_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(4,))
 
     def make_env():
         env = PointEnv()
@@ -54,7 +54,10 @@ def train(num_timesteps, seed, log_folder):
                             gamma=0.99,
                             noptepochs=10,
                             log_interval=1,
-                            ent_coef=0.1,
+                            policy_entropy=0.01,
+                            embedding_entropy=0.,
+                            inference_coef=0.01,
+                            inference_horizon=5,
                             lr=3e-4,
                             cliprange=0.2,
                             seed=seed,

@@ -7,6 +7,7 @@ import os.path as osp
 import tensorflow as tf
 
 import point_env
+from inference_net import InferenceNetwork
 from point_env import PointEnv
 from policies import MlpEmbedPolicy
 
@@ -21,11 +22,12 @@ from baselines.common.vec_env.vec_normalize import VecNormalize
 
 class Model(object):
     def __init__(self, *, policy, ob_space, ac_space, task_space, latent_space, nbatch_act, nbatch_train,
-                 nsteps, policy_entropy, vf_coef, max_grad_norm, embedding_entropy=0., seed=None):
+                 nsteps, policy_entropy, vf_coef, max_grad_norm, embedding_entropy=0., inference_coef=0.1, inference_horizon=5, seed=None):
         sess = tf.get_default_session()
         with tf.variable_scope("PPO"):
             act_model = policy(sess, ob_space, ac_space, task_space, latent_space, nbatch_act, 1, reuse=False, seed=seed, name="model")  # type: MlpEmbedPolicy
             train_model = policy(sess, ob_space, ac_space, task_space, latent_space, nbatch_train, nsteps, reuse=True, seed=seed, name="model")  # type: MlpEmbedPolicy
+            inference_model = InferenceNetwork(sess, ob_space, ac_space, latent_space, horizon=inference_horizon)
 
             A = tf.placeholder(dtype=tf.float32, shape=train_model.pd.batch_shape, name="actions")
             # A = train_model.pd.sample(name="A")
@@ -57,9 +59,12 @@ class Model(object):
                 clipfrac = tf.reduce_mean(tf.to_float(tf.greater(tf.abs(ratio - 1.0), CLIPRANGE)), name="clip_frac")
                 loss = tf.identity(pg_loss + vf_loss * vf_coef, name="policy_loss")
 
+                _inference_loss = tf.placeholder(tf.float32, [], name="inference_loss")
+
                 final_loss = tf.identity(loss
                                          - policy_entropy * entropy
                                          - embedding_entropy * train_model.embedding_entropy,
+                                         # + inference_coef * _inference_loss,
                              name="final_loss")
 
             with tf.variable_scope('model', reuse=True):
@@ -74,8 +79,7 @@ class Model(object):
                 trainer = tf.train.AdamOptimizer(learning_rate=LR, epsilon=1e-5, name="adam_opt")
                 _train = trainer.apply_gradients(grads)
 
-        # obs, tasks, returns, masks, actions, values, neglogpacs
-        def train(lr, cliprange, obs, tasks, returns, masks, actions, values, neglogpacs, latents, states=None):
+        def train(lr, cliprange, obs, tasks, returns, masks, actions, values, neglogpacs, latents, inference_loss, states=None):
             advs = returns - values
             advs = (advs - advs.mean()) / (advs.std() + 1e-8)
             td_map = {
@@ -88,6 +92,7 @@ class Model(object):
                 CLIPRANGE: cliprange,
                 OLDNEGLOGPAC: neglogpacs,
                 OLDVPRED: values,
+                _inference_loss: inference_loss,
                 # train_model.Embedding: latents
             }
             if states is not None:
@@ -120,6 +125,7 @@ class Model(object):
 
         self.train = train
         self.train_model = train_model
+        self.inference_model = inference_model
         self.act_model = act_model
         self.step = act_model.step
         self.step_from_task = act_model.step_from_task
@@ -168,8 +174,10 @@ class Runner(object):
         mb_states = self.states
         epinfos = []
         completions = 0
+        traj_window = deque(maxlen=self.model.inference_model.horizon)
+        traj_windows = []
+        discounts = []
         for step in range(self.nsteps):
-            self.latents = [self.model.get_latent(t) for t in self.tasks]
             actions, values, mb_states, neglogpacs = self.model.step(self.latents, self.obs, self.states, self.dones)
             # actions, values, mb_states, neglogpacs = self.model.step_from_task(
             #     self.onehots, self.obs, self.states, self.dones)
@@ -184,31 +192,13 @@ class Runner(object):
             mb_rewards.append(rewards)
 
             mb_tasks.append(infos[-1]["episode"]["task"])
-            mb_latents.append(self.latents)
-
-
-            #     done = True
-            # else:
-            #     mb_tasks.append(infos[-1]["episode"]["task"])
-            # for info in infos:
-            #     maybeepinfo = info.get('episode')
-            #     if maybeepinfo: epinfos.append(maybeepinfo)
+            mb_latents.append(np.array(self.latents).flatten())
 
             epinfos += [info["episode"] for info in infos]
 
             if any(self.dones) or step % self.max_length == 0:
                 if step % self.max_length == 0:
                     self.obs[:] = self.env.reset()
-                # handle malicious sum(rewards) from gym.Monitor
-                # print("DONE", rewards)
-
-                # VecEnv resets environment already
-                # self.obs[:] = self.env.reset()
-
-                # for e in self.env.envs:
-                #     e._task += 1
-                #     e._task = self.model.task_space.shape[0] % self.model.task_space.shape[0]
-                #     e._goal = point_env.TASKS[e._task]
                 self.tasks = [e.task for e in self.env.envs]
                 self.onehots = []
                 for task in self.tasks:
@@ -217,19 +207,17 @@ class Runner(object):
                     self.onehots.append(np.copy(one_hot))
                 self.latents = [self.model.get_latent(t) for t in self.tasks]
 
+                discounts.append(self.gamma)
+                # fill horizon buffer with step 0 copies of trajectory
+                for _ in range(self.model.inference_model.horizon):
+                    traj_window.append(np.concatenate((self.obs, actions)))
+
                 completions += 1
+            else:
+                discounts.append(discounts[-1] * self.gamma)
+                traj_window.append(np.concatenate((self.obs, actions)))
 
-            # mb_obs.append(self.obs.copy())
-            # mb_actions.append(actions)
-            # mb_values.append(values)
-            # mb_neglogpacs.append(neglogpacs)
-            # mb_dones.append(self.dones)
-            # mb_latents.append(self.latents)
-            # mb_rewards.append(rewards)
-
-            # if self.dones[-1]:
-            #     self.obs[:] = self.env.reset()
-            #     self.tasks = [e.task for e in self.env.venv.envs]
+            traj_windows.append(np.array(traj_window).flatten())
 
         # batch of steps to batch of rollouts
         mb_obs = np.asarray(mb_obs, dtype=self.obs.dtype)
@@ -240,8 +228,14 @@ class Runner(object):
         mb_dones = np.asarray(mb_dones, dtype=np.bool)
         mb_tasks = np.asarray(mb_tasks, dtype=np.float32)
         mb_latents = np.asarray(mb_latents, dtype=np.float32)
-        # last_values = self.model.value(self.latents, self.obs, self.states, self.dones)
-        last_values = self.model.value_from_task(self.onehots, self.obs, self.states, self.dones)
+        last_values = self.model.value(self.latents, self.obs, self.states, self.dones)
+        traj_windows = np.array(traj_windows)
+        discounts = np.array(discounts)
+
+        # train and evaluate inference network
+        # TODO shuffle the input for a better training outcome?
+        inference_lll = self.model.inference_model.train(traj_windows, discounts, mb_latents)
+        inference_loss, inference_discounted_log_likelihoods = tuple(inference_lll)
 
         print("MEAN reward:", np.mean(mb_rewards))
         completion_ratio = completions * 1. / self.nsteps
@@ -261,10 +255,10 @@ class Runner(object):
             delta = mb_rewards[t] + self.gamma * nextvalues * nextnonterminal - mb_values[t]
             mb_advs[t] = lastgaelam = delta + self.gamma * self.lam * nextnonterminal * lastgaelam
 
-        mb_returns = mb_advs + mb_values
+        mb_returns = mb_advs + mb_values + inference_discounted_log_likelihoods.reshape(mb_advs.shape)
 
         return (*map(sf01, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, mb_latents)),
-                mb_tasks, mb_states, epinfos, completion_ratio)
+                mb_tasks, mb_states, epinfos, completion_ratio, inference_loss, inference_discounted_log_likelihoods)
 
 
 # obs, returns, masks, actions, values, neglogpacs, states = runner.run()
@@ -359,9 +353,11 @@ def visualize(model: Model, env: DummyVecEnv, update: int, plot_folder: str):
 
     fig.tight_layout(rect=[0, 0.03, 1, 0.95])
     fig.savefig(osp.join(plot_folder, 'embed_%05d.png' % update))
+    plt.clf()
 
 
-def learn(*, policy, env, task_space, latent_space, nsteps, total_timesteps, ent_coef, lr,
+def learn(*, policy, env, task_space, latent_space, nsteps, total_timesteps,
+          policy_entropy, embedding_entropy, inference_coef, inference_horizon, lr,
           vf_coef=0.5, max_grad_norm=0.5, gamma=0.99, lam=0.95,
           log_interval=10, nminibatches=4, noptepochs=4, cliprange=0.2, seed=None,
           save_interval=0, load_path=None, plot_interval=50, plot_folder=None, log_folder=None):
@@ -389,7 +385,12 @@ def learn(*, policy, env, task_space, latent_space, nsteps, total_timesteps, ent
                                task_space=task_space, latent_space=latent_space,
                                nbatch_act=nenvs,
                                nbatch_train=nbatch_train,
-                               nsteps=nsteps, policy_entropy=ent_coef, vf_coef=vf_coef,
+                               nsteps=nsteps,
+                               policy_entropy=policy_entropy,
+                               embedding_entropy=embedding_entropy,
+                               inference_coef=inference_coef,
+                               inference_horizon=inference_horizon,
+                               vf_coef=vf_coef,
                                max_grad_norm=max_grad_norm, seed=seed)
     if save_interval and logger.get_dir():
         import cloudpickle
@@ -411,9 +412,11 @@ def learn(*, policy, env, task_space, latent_space, nsteps, total_timesteps, ent
         frac = 1.0 - (update - 1.0) / nupdates
         lrnow = lr(frac)
         cliprangenow = cliprange(frac)
-        obs, returns, masks, actions, values, neglogpacs, latents, tasks, states, epinfos, completion_ratio = runner.run()
+        obs, returns, masks, actions, values, neglogpacs, latents, tasks, states, epinfos, \
+            completion_ratio, inference_loss, inference_discounted_log_likelihoods = runner.run()
         epinfobuf.extend(epinfos)
         mblossvals = []
+        inference_losses = []
         if states is None:  # nonrecurrent version
             inds = np.arange(nbatch)
             for _ in range(noptepochs):
@@ -423,8 +426,14 @@ def learn(*, policy, env, task_space, latent_space, nsteps, total_timesteps, ent
                     mbinds = inds[start:end]
                     # print("mbinds", mbinds)
                     # print("tasks", tasks.shape)
+
+                    # train inference network
+                    # slices = (arr[mbinds] for arr in (obs, actions, latents))
+                    # inference_losses.append(model.inference_model.train(*slices))
+
+                    # train policy and embedding network
                     slices = (arr[mbinds] for arr in (obs, tasks, returns, masks, actions, values, neglogpacs, latents))
-                    mblossvals.append(model.train(lrnow, cliprangenow, *slices))
+                    mblossvals.append(model.train(lrnow, cliprangenow, *slices, inference_loss=inference_loss))
         # else:  # recurrent version
         #     assert nenvs % nminibatches == 0
         #     envsperbatch = nenvs // nminibatches
@@ -459,6 +468,7 @@ def learn(*, policy, env, task_space, latent_space, nsteps, total_timesteps, ent
             logger.logkv('time_elapsed', tnow - tfirststart)
             for (lossval, lossname) in zip(lossvals, model.loss_names):
                 logger.logkv("loss/%s" % lossname, lossval)
+            logger.logkv("loss/inference_net", inference_loss)
             logger.dumpkvs()
             if update == 1 and log_folder is not None:
                 # save graph to visualize in TensorBoard

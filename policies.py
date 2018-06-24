@@ -78,7 +78,7 @@ class MlpEmbedPolicy(object):
             with tf.name_scope("embedding"):
                 em_h1 = tf.tanh(fc(processed_t, 'embed_fc1', nh=8, init_scale=0.5), name="em_h1")
                 em_h2 = tf.tanh(fc(em_h1, 'embed_fc2', nh=latent_space.shape[0], init_scale=0.5), name="em_h2")
-                em_logstd = tf.get_variable(name='em_logstd', shape=[1, ac_space.shape[0]],
+                em_logstd = tf.get_variable(name='em_logstd', shape=[1, latent_space.shape[0]],
                                          initializer=tf.zeros_initializer(), trainable=True)
                 em_std = tf.exp(em_logstd, name="em_std")
                 self.em_pd = tf.distributions.Normal(em_h2, em_std, name="embedding", validate_args=True)
