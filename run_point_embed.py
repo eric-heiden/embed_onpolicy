@@ -48,11 +48,13 @@ def train(num_timesteps, seed, log_folder):
                             env=env,
                             task_space=task_space,
                             latent_space=latent_space,
-                            nsteps=500,
-                            nminibatches=5,
+                            # nsteps=1000,
+                            # nminibatches=5,
+                            traj_size=30,
                             lam=0.95,
                             gamma=0.99,
-                            noptepochs=10,
+                            pi_opt_epochs=10,
+                            inference_opt_epochs=10,
                             log_interval=1,
                             policy_entropy=0.01,
                             embedding_entropy=0.,
@@ -74,7 +76,7 @@ def main():
     print("Logging to %s." % log_folder)
     logger.configure(dir=log_folder,
                      format_strs=['stdout', 'log', 'csv', 'tensorboard'])
-    model, env = train(num_timesteps=1e6, seed=SEED, log_folder=log_folder)
+    model, env = train(num_timesteps=3e6, seed=SEED, log_folder=log_folder)
 
     logger.log("Running trained model")
     for _ in range(20):

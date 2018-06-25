@@ -21,12 +21,14 @@ from baselines.common.vec_env.vec_normalize import VecNormalize
 
 
 class Model(object):
-    def __init__(self, *, policy, ob_space, ac_space, task_space, latent_space, nbatch_act, nbatch_train,
-                 nsteps, policy_entropy, vf_coef, max_grad_norm, embedding_entropy=0., inference_coef=0.1, inference_horizon=5, seed=None):
+    def __init__(self, *, policy, ob_space, ac_space, task_space, latent_space, traj_size,
+                 policy_entropy, vf_coef, max_grad_norm, embedding_entropy=0., inference_coef=0.1, inference_horizon=5, seed=None):
         sess = tf.get_default_session()
         with tf.variable_scope("PPO"):
-            act_model = policy(sess, ob_space, ac_space, task_space, latent_space, nbatch_act, 1, reuse=False, seed=seed, name="model")  # type: MlpEmbedPolicy
-            train_model = policy(sess, ob_space, ac_space, task_space, latent_space, nbatch_train, nsteps, reuse=True, seed=seed, name="model")  # type: MlpEmbedPolicy
+            act_model = policy(sess, ob_space, ac_space, task_space, latent_space, traj_size=1,
+                               reuse=False, seed=seed, name="model")  # type: MlpEmbedPolicy
+            train_model = policy(sess, ob_space, ac_space, task_space, latent_space, traj_size=traj_size,
+                                 reuse=True, seed=seed, name="model")  # type: MlpEmbedPolicy
             inference_model = InferenceNetwork(sess, ob_space, ac_space, latent_space, horizon=inference_horizon)
 
             A = tf.placeholder(dtype=tf.float32, shape=train_model.pd.batch_shape, name="actions")
@@ -45,7 +47,8 @@ class Model(object):
 
             with tf.name_scope("ValueFunction"):
                 vpred = train_model.vf
-                vpredclipped = tf.identity(OLDVPRED + tf.clip_by_value(train_model.vf - OLDVPRED, -CLIPRANGE, CLIPRANGE, name="clip_vf"), name="vpred_clipped")
+                vpredclipped = tf.identity(OLDVPRED + tf.clip_by_value(train_model.vf - OLDVPRED, -CLIPRANGE, CLIPRANGE,
+                                                                       name="clip_vf"), name="vpred_clipped")
                 vf_losses1 = tf.square(vpred - R, name="vf_loss1")
                 vf_losses2 = tf.square(vpredclipped - R, name="vf_loss2")
                 vf_loss = tf.identity(.5 * tf.reduce_mean(tf.maximum(vf_losses1, vf_losses2)), name="vf_loss")
@@ -84,7 +87,7 @@ class Model(object):
             advs = (advs - advs.mean()) / (advs.std() + 1e-8)
             td_map = {
                 train_model.Observation: obs,
-                train_model.Task: tasks,
+                train_model.Task: [tasks[0]],
                 A: actions,
                 ADV: advs,
                 R: returns,
@@ -99,7 +102,7 @@ class Model(object):
                 td_map[train_model.S] = states
                 td_map[train_model.M] = masks
             return sess.run(
-                [pg_loss, vf_loss, approxkl, clipfrac, entropy, train_model.embedding_entropy, final_loss, _train],
+                [pg_loss, vf_loss, approxkl, clipfrac, entropy, train_model.embedding_entropy, final_loss, train_model.Embedding, _train],
                 td_map
             )[:-1]
 
@@ -146,38 +149,42 @@ class Model(object):
 
 class Runner(object):
 
-    def __init__(self, *, env: DummyVecEnv, model: Model, nsteps, gamma, lam, max_length: int = 20):
+    def __init__(self, *, env: DummyVecEnv, model: Model, gamma, lam, traj_size: int = 20, inference_opt_epochs: int = 4):
         self.env = env
         self.model = model
         nenv = env.num_envs
-        self.batch_ob_shape = (nenv * nsteps,) + env.observation_space.shape
+        assert(nenv == 1)  # ensure to sample from embedding the same number of steps, in training and acting
+        self.batch_ob_shape = (nenv * traj_size,) + env.observation_space.shape
         self.obs = np.zeros((nenv,) + env.observation_space.shape, dtype=env.observation_space.dtype.name)
         self.obs[:] = env.reset()
-        self.tasks = [e.task for e in env.envs]
-        self.onehots = []
-        for task in self.tasks:
-            one_hot = np.zeros((self.model.task_space.shape[0],))
-            one_hot[task] = 1
-            self.onehots.append(one_hot)
-        self.latents = [model.get_latent(t) for t in self.tasks]
-        self.nsteps = nsteps
         self.states = model.initial_state
         self.dones = [False for _ in range(nenv)]
 
         self.lam = lam
         self.gamma = gamma
-        self.max_length = max_length
+        self.traj_size = traj_size
+        self.inference_opt_epochs = inference_opt_epochs
 
     def run(self):
         mb_obs, mb_rewards, mb_actions, mb_latents, mb_tasks, mb_values, mb_dones, mb_neglogpacs = \
             [], [], [], [], [], [], [], []
         mb_states = self.states
+
+        self.tasks = [e.select_next_task() for e in self.env.envs]
+        self.onehots = []
+        for task in self.tasks:
+            one_hot = np.zeros((self.model.task_space.shape[0],))
+            one_hot[task] = 1
+            self.onehots.append(one_hot)
+        self.latents = [self.model.get_latent(t) for t in self.tasks]
+
         epinfos = []
         completions = 0
         traj_window = deque(maxlen=self.model.inference_model.horizon)
         traj_windows = []
         discounts = []
-        for step in range(self.nsteps):
+
+        for step in range(self.traj_size):
             actions, values, mb_states, neglogpacs = self.model.step(self.latents, self.obs, self.states, self.dones)
             # actions, values, mb_states, neglogpacs = self.model.step_from_task(
             #     self.onehots, self.obs, self.states, self.dones)
@@ -196,27 +203,26 @@ class Runner(object):
 
             epinfos += [info["episode"] for info in infos]
 
-            if any(self.dones) or step % self.max_length == 0:
-                if step % self.max_length == 0:
-                    self.obs[:] = self.env.reset()
-                self.tasks = [e.task for e in self.env.envs]
-                self.onehots = []
-                for task in self.tasks:
-                    one_hot = np.zeros((self.model.task_space.shape[0],))
-                    one_hot[task] = 1
-                    self.onehots.append(np.copy(one_hot))
-                self.latents = [self.model.get_latent(t) for t in self.tasks]
+            if any(self.dones):
+                self.obs[:] = self.env.reset()
+                # self.tasks = [e.task for e in self.env.envs]
+                # self.onehots = []
+                # for task in self.tasks:
+                #     one_hot = np.zeros((self.model.task_space.shape[0],))
+                #     one_hot[task] = 1
+                #     self.onehots.append(np.copy(one_hot))
+                # self.latents = [self.model.get_latent(t) for t in self.tasks]
 
-                discounts.append(self.gamma)
+                completions += 1
+            if any(self.dones) or step == 0:
                 # fill horizon buffer with step 0 copies of trajectory
                 for _ in range(self.model.inference_model.horizon):
                     traj_window.append(np.concatenate((self.obs, actions)))
-
-                completions += 1
+                discounts.append(self.gamma)
             else:
                 discounts.append(discounts[-1] * self.gamma)
-                traj_window.append(np.concatenate((self.obs, actions)))
 
+            traj_window.append(np.concatenate((self.obs, actions)))
             traj_windows.append(np.array(traj_window).flatten())
 
         # batch of steps to batch of rollouts
@@ -232,21 +238,26 @@ class Runner(object):
         traj_windows = np.array(traj_windows)
         discounts = np.array(discounts)
 
+        inference_loss, inference_discounted_log_likelihoods = 0, []
         # train and evaluate inference network
-        # TODO shuffle the input for a better training outcome?
-        inference_lll = self.model.inference_model.train(traj_windows, discounts, mb_latents)
-        inference_loss, inference_discounted_log_likelihoods = tuple(inference_lll)
+        for epoch in range(self.inference_opt_epochs):
+            idxs = np.arange(self.traj_size)
+            if epoch < self.inference_opt_epochs - 1:
+                np.random.shuffle(idxs)
+            # TODO shuffle the input for a better training outcome? Is this correct?!
+            inference_lll = self.model.inference_model.train(traj_windows[idxs], discounts[idxs], mb_latents[idxs])
+            inference_loss, inference_discounted_log_likelihoods = tuple(inference_lll)
 
         print("MEAN reward:", np.mean(mb_rewards))
-        completion_ratio = completions * 1. / self.nsteps
+        completion_ratio = completions * 1. / self.traj_size
 
         # discount/bootstrap off value fn
         mb_returns = np.zeros_like(mb_rewards)
         mb_advs = np.zeros_like(mb_rewards)
         lastgaelam = 0
 
-        for t in reversed(range(self.nsteps)):
-            if t == self.nsteps - 1:
+        for t in reversed(range(self.traj_size)):
+            if t == self.traj_size - 1:
                 nextnonterminal = 1.0 - self.dones
                 nextvalues = last_values
             else:
@@ -257,7 +268,7 @@ class Runner(object):
 
         mb_returns = mb_advs + mb_values + inference_discounted_log_likelihoods.reshape(mb_advs.shape)
 
-        return (*map(sf01, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, mb_latents)),
+        return (*map(sf01, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs)), mb_latents,
                 mb_tasks, mb_states, epinfos, completion_ratio, inference_loss, inference_discounted_log_likelihoods)
 
 
@@ -356,10 +367,83 @@ def visualize(model: Model, env: DummyVecEnv, update: int, plot_folder: str):
     plt.clf()
 
 
-def learn(*, policy, env, task_space, latent_space, nsteps, total_timesteps,
+def visualize_old(model: Model, env: DummyVecEnv, update: int, plot_folder: str):
+    import matplotlib
+    matplotlib.use('Agg')
+    matplotlib.rcParams['pdf.fonttype'] = 42
+    matplotlib.rcParams['ps.fonttype'] = 42
+    import matplotlib.pyplot as plt
+    import pylab
+
+    nenv = env.num_envs
+    nsteps = 40
+    nsamples = 10
+    ntasks = len(point_env.TASKS)
+    colormap = lambda x: matplotlib.cm.get_cmap("winter")(1.-x)
+
+    fig, axes = plt.subplots(figsize=(ntasks * 4, 8), nrows=2, ncols=ntasks, sharey='row')
+    fig.suptitle(('Iteration %i' % update) + (' (using %s distribution)' % ('Normal', 'Beta')[int(model.use_beta)]))
+    if ntasks == 1:
+        axes = [[axes[0]], [axes[1]]]
+    for t in range(ntasks):
+        one_hot = np.zeros((model.task_space.shape[0],))
+        one_hot[t] = 1
+        onehots = [one_hot]
+
+        ax = axes[0][t]
+        ax.set_title(str(one_hot))  # "Task % i" % (t + 1))
+        ax.grid()
+        ax.set_xlim([-4, 4])
+        ax.set_ylim([-4, 4])
+        ax.set_aspect('equal')
+
+        goal = plt.Circle(point_env.TASKS[t], radius=point_env.MIN_DIST, color='orange')
+        ax.add_patch(goal)
+        # ax.scatter([point_env.TASKS[t][0]], [point_env.TASKS[t][1]], s=50, c='r')
+
+        ax_latent = axes[1][t]
+        ax_latent.grid()
+        ticks = np.arange(0, model.latent_space.shape[0], 1)
+        ax_latent.set_xticks(ticks)
+
+        for sample in range(nsamples):
+            obs = np.zeros((nenv,) + env.observation_space.shape, dtype=env.observation_space.dtype.name)
+            obs[:] = env.reset()
+            for pointEnv in env.envs:
+                pointEnv._task = t  # TODO expose via setter
+                pointEnv._goal = point_env.TASKS[t]
+            dones = [False for _ in range(nenv)]
+            positions = [np.copy(obs[0])]
+
+            latents = [model.get_latent(t)]
+            for _ in range(nsteps):
+                actions, values, mb_states, neglogpacs = model.step(latents, obs, model.initial_state, dones)
+                # actions, values, mb_states, neglogpacs = model.step_from_task(
+                #     onehots, obs, model.initial_state, dones)
+                if not model.use_beta:
+                    actions *= 0.1
+                # actions = np.clip(actions, model.action_space.low[0], model.action_space.high[0])
+                obs[:], rewards, dones, infos = env.step(actions)
+                positions.append(np.copy(obs[0]))
+                if dones[-1]:
+                    break
+            positions = np.array(positions)
+            positions = np.reshape(positions, (-1, 2))
+            ax.scatter(positions[:, 0], positions[:, 1], color=colormap(sample * 1. / nsamples), s=2, zorder=2)
+            ax.plot(positions[:, 0], positions[:, 1], color=colormap(sample * 1. / nsamples), zorder=2)
+
+            # visualize latents TODO make actions dependent on these
+            ax_latent.scatter(ticks, latents, color=colormap(sample * 1. / nsamples))
+
+    fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+    fig.savefig(osp.join(plot_folder, 'embed_%05d.png' % update))
+    plt.clf()
+
+
+def learn(*, policy, env, task_space, latent_space, traj_size, total_timesteps,
           policy_entropy, embedding_entropy, inference_coef, inference_horizon, lr,
           vf_coef=0.5, max_grad_norm=0.5, gamma=0.99, lam=0.95,
-          log_interval=10, nminibatches=4, noptepochs=4, cliprange=0.2, seed=None,
+          log_interval=10, pi_opt_epochs=4, inference_opt_epochs=4, cliprange=0.2, seed=None,
           save_interval=0, load_path=None, plot_interval=50, plot_folder=None, log_folder=None):
     if isinstance(lr, float):
         lr = constfn(lr)
@@ -378,14 +462,14 @@ def learn(*, policy, env, task_space, latent_space, nsteps, total_timesteps,
     nenvs = env.num_envs
     ob_space = env.observation_space
     ac_space = env.action_space
-    nbatch = nenvs * nsteps
-    nbatch_train = nbatch // nminibatches
+    # nbatch = nenvs * nsteps
+    # nbatch_train = nbatch // nminibatches
 
     make_model = lambda: Model(policy=policy, ob_space=ob_space, ac_space=ac_space,
                                task_space=task_space, latent_space=latent_space,
-                               nbatch_act=nenvs,
-                               nbatch_train=nbatch_train,
-                               nsteps=nsteps,
+                               # nbatch_act=nenvs,
+                               # nbatch_train=nbatch_train,
+                               traj_size=traj_size,
                                policy_entropy=policy_entropy,
                                embedding_entropy=embedding_entropy,
                                inference_coef=inference_coef,
@@ -399,15 +483,14 @@ def learn(*, policy, env, task_space, latent_space, nsteps, total_timesteps,
     model = make_model()
     if load_path is not None:
         model.load(load_path)
-    runner = Runner(env=env, model=model, nsteps=nsteps, gamma=gamma, lam=lam)
+    runner = Runner(env=env, model=model, traj_size=traj_size, inference_opt_epochs=inference_opt_epochs,
+                    gamma=gamma, lam=lam)
 
     epinfobuf = deque(maxlen=100)
     tfirststart = time.time()
 
-    nupdates = total_timesteps // nbatch
+    nupdates = total_timesteps // traj_size
     for update in range(1, nupdates + 1):
-        assert nbatch % nminibatches == 0
-        nbatch_train = nbatch // nminibatches
         tstart = time.time()
         frac = 1.0 - (update - 1.0) / nupdates
         lrnow = lr(frac)
@@ -416,31 +499,41 @@ def learn(*, policy, env, task_space, latent_space, nsteps, total_timesteps,
             completion_ratio, inference_loss, inference_discounted_log_likelihoods = runner.run()
         epinfobuf.extend(epinfos)
         mblossvals = []
-        inference_losses = []
-        if states is None:  # nonrecurrent version
-            inds = np.arange(nbatch)
-            for _ in range(noptepochs):
-                np.random.shuffle(inds)
-                for start in range(0, nbatch, nbatch_train):
-                    end = start + nbatch_train
-                    mbinds = inds[start:end]
-                    # print("mbinds", mbinds)
-                    # print("tasks", tasks.shape)
 
-                    # train inference network
-                    # slices = (arr[mbinds] for arr in (obs, actions, latents))
-                    # inference_losses.append(model.inference_model.train(*slices))
+        latent_distances = []
+        slices = (arr for arr in (obs, tasks, returns, masks, actions, values, neglogpacs, latents))
+        train_return = model.train(lrnow, cliprangenow, *slices, inference_loss=inference_loss)
+        train_latents = train_return[-1]
+        latent_distances.append(list(np.abs(latents - train_latents)))
+        mblossvals.append(train_return[:-1])
 
-                    # train policy and embedding network
-                    slices = (arr[mbinds] for arr in (obs, tasks, returns, masks, actions, values, neglogpacs, latents))
-                    mblossvals.append(model.train(lrnow, cliprangenow, *slices, inference_loss=inference_loss))
+        # if states is None:  # nonrecurrent version
+        #     inds = np.arange(traj_size)
+        #     for _ in range(pi_opt_epochs):
+        #         # np.random.shuffle(inds)
+        #         for start in range(0, nbatch, nbatch_train):
+        #             end = start + nbatch_train
+        #             mbinds = inds[start:end]
+        #             # print("mbinds", mbinds)
+        #             # print("tasks", tasks.shape)
+        #
+        #             # train inference network
+        #             # slices = (arr[mbinds] for arr in (obs, actions, latents))
+        #             # inference_losses.append(model.inference_model.train(*slices))
+        #
+        #             # train policy and embedding network
+        #             slices = (arr[mbinds] for arr in (obs, tasks, returns, masks, actions, values, neglogpacs, latents))
+        #             train_return = model.train(lrnow, cliprangenow, *slices, inference_loss=inference_loss)
+        #             train_latents = train_return[-1]
+        #             latent_distances.append(list(np.abs(latents[mbinds] - train_latents)))
+        #             mblossvals.append(train_return[:-1])
         # else:  # recurrent version
         #     assert nenvs % nminibatches == 0
         #     envsperbatch = nenvs // nminibatches
         #     envinds = np.arange(nenvs)
         #     flatinds = np.arange(nenvs * nsteps).reshape(nenvs, nsteps)
         #     envsperbatch = nbatch_train // nsteps
-        #     for _ in range(noptepochs):
+        #     for _ in range(pi_opt_epochs):
         #         np.random.shuffle(envinds)
         #         for start in range(0, nenvs, envsperbatch):
         #             end = start + envsperbatch
@@ -450,16 +543,18 @@ def learn(*, policy, env, task_space, latent_space, nsteps, total_timesteps,
         #             mbstates = states[mbenvinds]
         #             mblossvals.append(model.train(lrnow, cliprangenow, *slices, mbstates))
 
+        latent_distances = np.mean(latent_distances)
+
         lossvals = np.mean(mblossvals, axis=0)
         tnow = time.time()
-        fps = int(nbatch / (tnow - tstart))
+        fps = int(traj_size / (tnow - tstart))
         if update % log_interval == 0 or update == 1:
             ev = explained_variance(values, returns)
-            logger.logkv("serial_timesteps", update * nsteps)
             # logger.logkv("nupdates", update)
             # logger.logkv("total_timesteps", update * nbatch)
             logger.logkv("fps", fps)
             logger.logkv("completion_ratio", completion_ratio)
+            logger.logkv("latent_sample_error", latent_distances)
             logger.logkv("explained_variance", float(ev))
             logger.logkv("episode/reward", safemean([epinfo['r'] for epinfo in epinfobuf]))
             logger.logkv("episode/length", safemean([epinfo['l'] for epinfo in epinfobuf]))
@@ -475,8 +570,8 @@ def learn(*, policy, env, task_space, latent_space, nsteps, total_timesteps,
                 writer = tf.summary.FileWriter(logdir=log_folder, graph=tf.get_default_graph())
                 writer.add_graph(tf.get_default_graph())
                 writer.flush()
-        if plot_interval and (update % plot_interval == 0 or update == 1):
-            visualize(model, env, update, plot_folder)
+        # if plot_interval and (update % plot_interval == 0 or update == 1):
+        #     visualize(model, env, update, plot_folder)
         if save_interval and (update % save_interval == 0 or update == 1) and logger.get_dir():
             checkdir = osp.join(logger.get_dir(), 'checkpoints')
             os.makedirs(checkdir, exist_ok=True)

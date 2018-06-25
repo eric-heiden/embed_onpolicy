@@ -66,13 +66,17 @@ class MlpPolicy(object):
 
 class MlpEmbedPolicy(object):
     def __init__(self, sess: tf.Session, ob_space: Box, ac_space: Box, task_space: Box, latent_space: Box,
-                 nbatch, nsteps, reuse=False, name="model", use_beta=False, seed=None):
+                 traj_size, reuse=False, name="model", use_beta=False, seed=None):
 
         with tf.variable_scope(name, reuse=reuse):
             # task input
             with tf.name_scope("task"):
-                Task, processed_t = space_input(task_space, nbatch, name="task")
+                Task, processed_t = space_input(task_space, 1, name="task")
                 processed_t = tf.layers.flatten(processed_t, "flattened_t")
+
+            # observation input
+            Observation, processed_ob = space_input(ob_space, traj_size, name="ob")
+            processed_ob = tf.layers.flatten(processed_ob, name="flattened_ob")
 
             # embedding network (with task as input)
             with tf.name_scope("embedding"):
@@ -84,16 +88,14 @@ class MlpEmbedPolicy(object):
                 self.em_pd = tf.distributions.Normal(em_h2, em_std, name="embedding", validate_args=True)
 
                 # embedding variable
+                # Embedding = self.em_pd.sample(name="em", seed=seed)
                 Embedding = self.em_pd.sample(name="em", seed=seed)
+                Embedding = tf.tile(Embedding, (traj_size, 1), name="tiled_embedding")
                 # Embedding = self.em_pd.sample(name="em")  # tf.Variable(tf.zeros((nbatch,) + latent_space.shape), dtype=latent_space.dtype, name="embedding")
                 # tf.assign(Embedding, em_h2, name="embedding_from_task")
 
             with tf.name_scope("embedding_entropy"):
                 embedding_entropy = tf.reduce_mean(self.em_pd.entropy(), name="embedding_entropy")
-
-            # observation input
-            Observation, processed_ob = space_input(ob_space, nbatch, name="ob")
-            processed_ob = tf.layers.flatten(processed_ob, name="flattened_ob")
 
             # embedding + observation input
             em_ob = tf.concat((Embedding, processed_ob), axis=1, name="em_ob")
@@ -115,7 +117,7 @@ class MlpEmbedPolicy(object):
                 with tf.name_scope("PolicyDist_beta"):
                     alpha = tf.nn.softplus(fc(pi_h2, 'pi_alpha1', ac_space.shape[0], init_scale=1., init_bias=1.), name='pi_alpha')
                     beta = tf.nn.softplus(fc(pi_h2, 'pi_beta1', ac_space.shape[0], init_scale=1., init_bias=1.), name='pi_beta')
-                    self.pd = tf.distributions.Beta(alpha + 0.0000001, beta + 0.0000001, validate_args=True, name="PolicyDist_beta")
+                    self.pd = tf.distributions.Beta(alpha + 1e-7, beta + 1e-7, validate_args=True, name="PolicyDist_beta")
             else:
                 # use Gaussian distribution
                 with tf.name_scope("PolicyDist_normal"):

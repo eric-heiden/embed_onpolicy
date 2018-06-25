@@ -51,12 +51,15 @@ class PointEnv(gym.Env):
     def task(self):
         return self._task
 
+    def select_next_task(self):
+        self._task = (self._task + 1) % len(TASKS)
+        self._goal = np.array(TASKS[self._task], dtype=np.float32)
+        return self._task
+
     def reset(self):
         self._point = np.zeros_like(self._goal)
         self._traces.append([tuple(self._point)])
         self._step = 0
-        self._task = (self._task + 1) % len(TASKS)
-        self._goal = np.array(TASKS[self._task], dtype=np.float32)
         return np.copy(self._point)
 
     def step(self, action):
