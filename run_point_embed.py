@@ -22,7 +22,7 @@ import ppo2embed
 SEED = 12345
 
 # use Beta distribution for policy, Gaussian otherwise
-USE_BETA = True
+USE_BETA = False
 
 
 def train(num_timesteps, seed, log_folder):
@@ -51,14 +51,15 @@ def train(num_timesteps, seed, log_folder):
                             # nsteps=1000,
                             # nminibatches=5,
                             traj_size=30,
+                            nbatches=2,
                             lam=0.95,
                             gamma=0.99,
                             pi_opt_epochs=10,
                             inference_opt_epochs=10,
                             log_interval=1,
-                            policy_entropy=0.01,
+                            policy_entropy=0.0,
                             embedding_entropy=0.,
-                            inference_coef=0.01,
+                            inference_coef=0.1,
                             inference_horizon=5,
                             lr=3e-4,
                             cliprange=0.2,

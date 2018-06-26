@@ -56,6 +56,11 @@ class PointEnv(gym.Env):
         self._goal = np.array(TASKS[self._task], dtype=np.float32)
         return self._task
 
+    def select_task(self, task: int):
+        self._task = task
+        self._goal = np.array(TASKS[self._task], dtype=np.float32)
+        return self._task
+
     def reset(self):
         self._point = np.zeros_like(self._goal)
         self._traces.append([tuple(self._point)])

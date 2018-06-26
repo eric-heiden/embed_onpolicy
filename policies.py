@@ -6,6 +6,9 @@ from baselines.common.distributions import make_pdtype
 from baselines import bench, logger
 
 
+EPS = 1e-7
+
+
 def space_input(space, batch_size=None, name='Ob'):
     """
     Build gym.spaces input with encoding depending on the
@@ -87,6 +90,9 @@ class MlpEmbedPolicy(object):
                 em_std = tf.exp(em_logstd, name="em_std")
                 self.em_pd = tf.distributions.Normal(em_h2, em_std, name="embedding", validate_args=True)
 
+                self.embedding_mean = self.em_pd.mean("embedding_mean")
+                self.embedding_std = self.em_pd.stddev("embedding_std")
+
                 # embedding variable
                 # Embedding = self.em_pd.sample(name="em", seed=seed)
                 Embedding = self.em_pd.sample(name="em", seed=seed)
@@ -117,7 +123,7 @@ class MlpEmbedPolicy(object):
                 with tf.name_scope("PolicyDist_beta"):
                     alpha = tf.nn.softplus(fc(pi_h2, 'pi_alpha1', ac_space.shape[0], init_scale=1., init_bias=1.), name='pi_alpha')
                     beta = tf.nn.softplus(fc(pi_h2, 'pi_beta1', ac_space.shape[0], init_scale=1., init_bias=1.), name='pi_beta')
-                    self.pd = tf.distributions.Beta(alpha + 1e-7, beta + 1e-7, validate_args=True, name="PolicyDist_beta")
+                    self.pd = tf.distributions.Beta(alpha + EPS, beta + EPS, validate_args=True, name="PolicyDist_beta")
             else:
                 # use Gaussian distribution
                 with tf.name_scope("PolicyDist_normal"):
@@ -140,7 +146,7 @@ class MlpEmbedPolicy(object):
                 with tf.name_scope("neg_log_prob_%s" % var_name):
                     if use_beta:
                         var = (var - l) / (h-l)
-                        return tf.identity(-tf.reduce_sum(self.pd.log_prob(tf.clip_by_value(var, 0.00001, 0.999999)), axis=-1), name="neg_log_prob_%s" % var_name)
+                        return tf.identity(-tf.reduce_sum(self.pd.log_prob(tf.clip_by_value(var, EPS, 1. - EPS)), axis=-1), name="neg_log_prob_%s" % var_name)
                     else:
                         return tf.identity(-tf.reduce_sum(self.pd.log_prob(var), axis=-1), name="neg_log_prob_%s" % var_name)
 
@@ -164,6 +170,9 @@ class MlpEmbedPolicy(object):
         def latent_from_task(task):
             return sess.run(Embedding, {Task: task})
 
+        def embedding_params(task):
+            return sess.run([self.embedding_mean, self.embedding_std], {Task: task})
+
         self.Observation = Observation
         self.Task = Task
         self.Embedding = Embedding
@@ -178,3 +187,4 @@ class MlpEmbedPolicy(object):
         self.neg_log_prob = neg_log_prob
         self.latent_from_task = latent_from_task
         self.embedding_entropy = embedding_entropy
+        self.embedding_params = embedding_params

@@ -8,7 +8,7 @@ from baselines import bench, logger
 
 class InferenceNetwork(object):
     def __init__(self, sess: tf.Session, ob_space: Box, ac_space: Box, latent_space: Box, horizon: int,
-                 learning_rate=1e-3, gamma=0.99):
+                 learning_rate=1e-3):
         print("Initializing inference network with H = %d" % horizon)
         self.horizon = horizon
         with tf.variable_scope("inference_network"):
@@ -32,6 +32,8 @@ class InferenceNetwork(object):
                                             initializer=tf.zeros_initializer(), trainable=True)
                 em_std = tf.exp(em_logstd, name="em_std")
                 self.em_pd = tf.distributions.Normal(em_h2, em_std, name="embedding", validate_args=True)
+                self.embedding_mean = self.em_pd.mean("embedding_mean")
+                self.embedding_std = self.em_pd.stddev("embedding_std")
 
             with tf.name_scope("true_latent"):
                 # latent input
@@ -58,13 +60,17 @@ class InferenceNetwork(object):
                 _train = trainer.apply_gradients(grads)
 
             def train(traj_windows, discounts, latents):
-                return sess.run([loss, discounted_ll, _train], {
+                return sess.run([loss, ll, discounted_ll, _train], {
                     traj_window: traj_windows,
                     discount: discounts,
                     Embedding: latents
                 })[:-1]
 
+            def embedding_params(traj_window):
+                return sess.run([self.embedding_mean, self.embedding_std], {traj_window: traj_window})
+
         # self.Observation = Observation
         # self.Action = Action
         # self.Embedding = Embedding
         self.train = train
+        self.embedding_params = embedding_params
