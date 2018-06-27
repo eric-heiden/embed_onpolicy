@@ -110,7 +110,7 @@ def learn(*, policy, env, task_space, latent_space, traj_size,
                     completion_ratio, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods = sampler.run(task)
                 epinfobuf.extend(epinfos)
                 training_batches.append((obs, tasks, returns, masks, actions, values, neglogpacs, states))
-                visualization_batches.append((obs, tasks, returns, masks, actions, values, neglogpacs, states, latents, inference_log_likelihoods))
+                visualization_batches.append((obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos))
                 act_latents.append(latents)
                 inference_losses.append(inference_loss)
                 sampled_tasks.append(tasks)
