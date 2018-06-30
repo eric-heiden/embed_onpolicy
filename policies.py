@@ -114,7 +114,11 @@ class MlpEmbedPolicy(object):
 
             # value function
             with tf.name_scope("vf"):
-                vf_h1 = tf.tanh(fc(em_ob, 'vf_fc1', nh=16, init_scale=np.sqrt(2)), name="vf_h1")
+                tiled_t = tf.tile(Task, (traj_size, 1), name="tiled_task")
+                ob_task = tf.concat((processed_ob, tiled_t), axis=1, name="ob_task")
+                # em_ob_task = tf.concat((Embedding, processed_ob, tiled_t), axis=1, name="em_ob_task")
+                # TODO input should be em_ob
+                vf_h1 = tf.tanh(fc(ob_task, 'vf_fc1', nh=16, init_scale=np.sqrt(2)), name="vf_h1")
                 vf_h2 = tf.tanh(fc(vf_h1, 'vf_fc2', nh=16, init_scale=np.sqrt(2)), name="vf_h2")
                 vf = fc(vf_h2, 'vf', 1)[:, 0]
 
@@ -123,7 +127,7 @@ class MlpEmbedPolicy(object):
                 with tf.name_scope("PolicyDist_beta"):
                     alpha = tf.nn.softplus(fc(pi_h2, 'pi_alpha1', ac_space.shape[0], init_scale=1., init_bias=1.), name='pi_alpha')
                     beta = tf.nn.softplus(fc(pi_h2, 'pi_beta1', ac_space.shape[0], init_scale=1., init_bias=1.), name='pi_beta')
-                    self.pd = tf.distributions.Beta(alpha + EPS, beta + EPS, validate_args=True, name="PolicyDist_beta")
+                    self.pd = tf.distributions.Beta(alpha + 1. +  EPS, beta + 1. + EPS, validate_args=True, name="PolicyDist_beta")
             else:
                 # use Gaussian distribution
                 with tf.name_scope("PolicyDist_normal"):
@@ -153,16 +157,17 @@ class MlpEmbedPolicy(object):
             neglogp0 = neg_log_prob(action, "action")
             self.initial_state = None
 
-        def step(latent, ob, *_args, **_kwargs):
-            a, v, neglogp = sess.run([action, vf, neglogp0], {Observation: ob, Embedding: latent})
+        def step(latent, ob, task, *_args, **_kwargs):
+            # XXX task is only fed for the value function!
+            a, v, neglogp = sess.run([action, vf, neglogp0], {Observation: ob, Embedding: latent, Task: task})
             return a, v, self.initial_state, neglogp
 
         def step_from_task(task, ob, *_args, **_kwargs):
             a, v, neglogp = sess.run([action, vf, neglogp0], {Observation: ob, Task: task})
             return a, v, self.initial_state, neglogp
 
-        def value(latent, ob, *_args, **_kwargs):
-            return sess.run(vf, {Observation: ob, Embedding: latent})
+        def value(latent, ob, task, *_args, **_kwargs):
+            return sess.run(vf, {Observation: ob, Embedding: latent, Task: task})
 
         def value_from_task(task, ob, *_args, **_kwargs):
             return sess.run(vf, {Observation: ob, Task: task})

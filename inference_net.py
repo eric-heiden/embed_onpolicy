@@ -17,7 +17,7 @@ class InferenceNetwork(object):
 
             with tf.name_scope("traj_window"):
                 # ob_ac = tf.concat((Observation, Action), axis=1, name="ob_ac")
-                traj_window = tf.placeholder(shape=(None, input_size),
+                self.traj_window = tf.placeholder(shape=(None, input_size),
                                        dtype=tf.float32,
                                        name="traj_window")
                 # shape = sess.run([ob_ac.get_shape()])
@@ -26,7 +26,7 @@ class InferenceNetwork(object):
                 # ob_ac = ob_ac.apply(tf.contrib.data.sliding_window_batch(window_size=horizon, stride=1))
 
             with tf.name_scope("embedding"):
-                em_h1 = tf.tanh(fc(traj_window, 'embed_fc1', nh=16, init_scale=0.5), name="em_h1")
+                em_h1 = tf.tanh(fc(self.traj_window, 'embed_fc1', nh=16, init_scale=0.5), name="em_h1")
                 em_h2 = tf.tanh(fc(em_h1, 'embed_fc2', nh=latent_size, init_scale=0.5), name="em_h2")
                 em_logstd = tf.get_variable(name='em_logstd', shape=[1, latent_size],
                                             initializer=tf.zeros_initializer(), trainable=True)
@@ -61,13 +61,13 @@ class InferenceNetwork(object):
 
             def train(traj_windows, discounts, latents):
                 return sess.run([loss, ll, discounted_ll, _train], {
-                    traj_window: traj_windows,
+                    self.traj_window: traj_windows,
                     discount: discounts,
                     Embedding: latents
                 })[:-1]
 
             def embedding_params(traj_window):
-                return sess.run([self.embedding_mean, self.embedding_std], {traj_window: traj_window})
+                return sess.run([self.embedding_mean, self.embedding_std], {self.traj_window: traj_window})
 
         # self.Observation = Observation
         # self.Action = Action

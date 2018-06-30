@@ -8,6 +8,7 @@ import point_env
 from ppo2embed import Model
 
 import matplotlib
+
 matplotlib.use('Agg')
 matplotlib.rcParams['pdf.fonttype'] = 42
 matplotlib.rcParams['ps.fonttype'] = 42
@@ -26,6 +27,7 @@ class Visualizer(object):
         ntasks = len(point_env.TASKS)
         nbins = 100
         latent_dim = self.model.latent_space.shape[0]
+        batch_tuple_size = 11
         colormap = lambda x: matplotlib.cm.get_cmap("winter")(1. - x)
 
         task_data_prior = [batches[t::ntasks] for t in range(ntasks)]  # batches grouped by task id
@@ -35,7 +37,7 @@ class Visualizer(object):
             for i, batch in enumerate(task_data_prior[task]):
                 for t in range(len(batch[0])):
                     sample = [batch[k][t] for k in range(len(batch))]
-                    if sample[-1]["l"] == 1 and len(task_samples) > 0:  # epinfo indicates first step
+                    if sample[-3]["l"] == 1 and len(task_samples) > 0:  # epinfo indicates first step
                         task_data[task].append(copy.copy(task_samples))
                         task_samples = [sample]
                     else:
@@ -43,18 +45,37 @@ class Visualizer(object):
                 if len(task_samples) > 0:
                     task_data[task].append(copy.copy(task_samples))
 
-        fig = plt.figure(figsize=(20, 20))
-        fig.suptitle(
-            ('Iteration %i' % update) + (' (using %s distribution)' % ('Normal', 'Beta')[int(self.model.use_beta)]))
+        title = 'Iteration %i' % update
+        title += ' (%s distribution)' % ('Normal', 'Beta')[int(self.model.use_beta)]
+        title += ' { ' + ', '.join("%s: %f" % (key, value) for key, value in self.model.parameters.items()) + ' }'
 
-        gs0 = gridspec.GridSpec(1, ntasks)
+        fig = plt.figure(figsize=(latent_dim * 6 + 3, ntasks * 3))
+        fig.suptitle(title)
+
+        gs0 = gridspec.GridSpec(ntasks, 1)
 
         latent_axes = []
+        infer_axes = []
+
+        embedding_means, embedding_stds = [], []
+        latent_mins = np.zeros(latent_dim)
+        latent_maxs = np.zeros(latent_dim)
+        for task in range(ntasks):
+            onehot = np.zeros(ntasks)
+            onehot[task] = 1
+            embedding_mean, embedding_std = tuple(self.model.act_model.embedding_params([onehot]))
+            embedding_means.append(embedding_mean[0])
+            embedding_stds.append(embedding_std[0])
+        for d in range(latent_dim):
+            latent_mins[d] = np.min([embedding_means[t][d] - 3. * embedding_stds[t][d] for t in range(ntasks)])
+            latent_maxs[d] = np.max([embedding_means[t][d] + 3. * embedding_stds[t][d] for t in range(ntasks)])
 
         for task in range(ntasks):
             nsamples = float(len(task_data[task]))
-            print("Plotting task", task)
-            gs00 = gridspec.GridSpecFromSubplotSpec(3, 1, subplot_spec=gs0[task])
+
+            # plot trajectories
+            # print("Plotting task", task)
+            gs00 = gridspec.GridSpecFromSubplotSpec(1, 1 + latent_dim * 2, subplot_spec=gs0[task])
             traj_ax = plt.Subplot(fig, gs00[0])
             traj_ax.set_title("Task % i" % (task + 1))
             traj_ax.grid()
@@ -67,40 +88,85 @@ class Visualizer(object):
                 tl.set_visible(False)
 
             for i, batch in enumerate(task_data[task]):
-                bs = tuple([np.array([batch[i][k] for i in range(len(batch))]) for k in range(9)])
-                obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos = bs
-                traj_ax.plot(obs[:, 0], obs[:, 1], color=colormap(i * 1. / nsamples), zorder=2, linewidth=.5, marker='o', markersize=1)
-
-            onehot = np.zeros(ntasks)
-            onehot[task] = 1
-            embedding_mean, embedding_std = tuple(self.model.act_model.embedding_params([onehot]))
-            print(embedding_mean, embedding_std)
-
+                bs = tuple([np.array([batch[i][k] for i in range(len(batch))]) for k in range(batch_tuple_size)])
+                obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos, \
+                    inference_means, inference_stds = bs
+                traj_ax.plot([0] + obs[:, 0], [0] + obs[:, 1], color=colormap(i * 1. / nsamples),
+                             zorder=2, linewidth=.5, marker='o', markersize=1)
             fig.add_subplot(traj_ax)
 
-            gs10 = gridspec.GridSpecFromSubplotSpec(latent_dim, 1, subplot_spec=gs00[1:])
+            embedding_mean, embedding_std = embedding_means[task], embedding_stds[task]
+            # print(embedding_mean, embedding_std)
+
+            # plot embeddings
+            gs10 = gridspec.GridSpecFromSubplotSpec(1, latent_dim, subplot_spec=gs00[1:1 + latent_dim])
             for li in range(latent_dim):
                 latent_ax = plt.Subplot(fig, gs10[li])
-                latent_ax.set_ylabel("latent[%i]" % li)
+                latent_ax.set_title("latent[%i]" % li)
                 latent_ax.grid()
                 if task > 0:
                     latent_ax.get_shared_x_axes().join(latent_ax, latent_axes[li])
 
-                mu, sigma = embedding_mean[0][li], embedding_std[0][li]
-                xs = np.linspace(mu - 2. * sigma, mu + 2 * sigma, nbins)
+                mu, sigma = embedding_mean[li], embedding_std[li]
+                xs = np.linspace(latent_mins[li], latent_maxs[li], nbins)
                 ys = ((1 / (np.sqrt(2 * np.pi) * sigma)) * np.exp(-0.5 * (1 / sigma * (xs - mu)) ** 2))
                 latent_ax.plot(xs, ys, linewidth=1.5, color="black")
 
                 latent_ax.fill_between(xs, ys, np.zeros_like(ys), facecolor="lightgrey", interpolate=True)
 
                 for i, batch in enumerate(task_data[task]):
-                    bs = tuple([np.array([batch[i][k] for i in range(len(batch))]) for k in range(9)])
-                    obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos = bs
+                    bs = tuple([np.array([batch[i][k] for i in range(len(batch))]) for k in range(batch_tuple_size)])
+                    obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos, \
+                        inference_means, inference_stds = bs
                     latent_ax.axvline(latents[0, li], zorder=2, linewidth=2, color=colormap(i * 1. / nsamples))
 
                 latent_axes.append(latent_ax)
                 fig.add_subplot(latent_ax)
 
-        # fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+            # plot inference performance
+            gs20 = gridspec.GridSpecFromSubplotSpec(1, latent_dim, subplot_spec=gs00[-latent_dim:])
+
+            for li in range(latent_dim):
+                infer_ax = plt.Subplot(fig, gs20[li])
+                infer_ax.set_title("inferred latent[%i]" % li)
+                infer_ax.grid()
+                if task > 0:
+                    infer_ax.get_shared_x_axes().join(infer_ax, infer_axes[li])
+                    infer_ax.get_shared_y_axes().join(infer_ax, infer_axes[li])
+
+                true_mu, true_sigma = embedding_mean[li], embedding_std[li]
+                xs = np.arange(0, self.model.traj_size)
+                infer_ax.fill_between(xs,
+                                      np.ones_like(xs) * (true_mu + true_sigma),
+                                      np.ones_like(xs) * (true_mu - true_sigma),
+                                      facecolor="r",
+                                      alpha=.3,
+                                      interpolate=True,
+                                      zorder=1)
+                infer_ax.plot(xs, np.ones_like(xs) * true_mu, color="r", label="true", zorder=2)
+
+                for i, batch in enumerate(task_data[task]):
+                    bs = tuple([np.array([batch[i][k] for i in range(len(batch))]) for k in range(batch_tuple_size)])
+                    obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos, \
+                        inference_means, inference_stds = bs
+                    mus = inference_means[:, li]
+                    sigmas = inference_means[:, li]
+                    xs = np.arange(0, len(obs))
+                    infer_ax.fill_between(xs,
+                                          mus + sigmas,
+                                          mus - sigmas,
+                                          facecolor=colormap(i * 1. / nsamples),
+                                          alpha=.3,
+                                          interpolate=True,
+                                          zorder=1)
+                    infer_ax.plot(xs, mus, color=colormap(i * 1. / nsamples), marker='o', markersize=1.5, zorder=2)
+                    if i > 3:
+                        break
+                if task == 0 and li == 0:
+                    infer_ax.legend()
+                infer_axes.append(infer_ax)
+                fig.add_subplot(infer_ax)
+
+        fig.tight_layout(rect=[0, 0.03, 1, 0.95])
         fig.savefig(osp.join(self.plot_folder, 'embed_%05d.png' % update))
         # plt.clf()

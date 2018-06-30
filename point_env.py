@@ -21,7 +21,7 @@ TASKS = [(3, 0), (0, 3), (-3, 0), (0, -3)]
 
 MIN_DIST = 0.5
 
-ACTION_LIMIT = 0.2
+ACTION_LIMIT = 0.3
 
 
 class PointEnv(gym.Env):
@@ -70,6 +70,8 @@ class PointEnv(gym.Env):
     def step(self, action):
         # l, h = -ACTION_LIMIT, ACTION_LIMIT
         # action = action * (h - l) + l
+        # action = np.clip(action, -ACTION_LIMIT, ACTION_LIMIT)
+        # action *= ACTION_LIMIT
         self._point = self._point + action
         self._traces[-1].append(tuple(self._point))
         self._step += 1

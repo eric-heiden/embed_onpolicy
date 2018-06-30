@@ -100,6 +100,7 @@ def learn(*, policy, env, task_space, latent_space, traj_size,
         inference_losses = []
         sampled_tasks = []
         completion_ratios = []
+        neglogpacs_total = []
 
         training_batches = []
         visualization_batches = []
@@ -107,10 +108,13 @@ def learn(*, policy, env, task_space, latent_space, traj_size,
         for i_batch in range(nbatches):
             for task in range(ntasks):
                 obs, returns, masks, actions, values, neglogpacs, latents, tasks, states, epinfos, \
-                    completion_ratio, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods = sampler.run(task)
+                    completion_ratio, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods, \
+                    inference_means, inference_stds = sampler.run(task)
                 epinfobuf.extend(epinfos)
                 training_batches.append((obs, tasks, returns, masks, actions, values, neglogpacs, states))
-                visualization_batches.append((obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos))
+                visualization_batches.append((obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos,
+                                              inference_means, inference_stds))
+                neglogpacs_total .append(neglogpacs)
                 act_latents.append(latents)
                 inference_losses.append(inference_loss)
                 sampled_tasks.append(tasks)
@@ -181,6 +185,11 @@ def learn(*, policy, env, task_space, latent_space, traj_size,
             for (lossval, lossname) in zip(lossvals, model.loss_names):
                 logger.logkv("loss/%s" % lossname, lossval)
             logger.logkv("loss/inference_net", safemean(inference_losses))
+
+            logger.logkv("ppo_internals/neglogpac", safemean(neglogpacs_total))
+            logger.logkv("ppo_internals/returns", safemean([b[2] for b in training_batches]))
+            logger.logkv("ppo_internals/values", safemean([b[5] for b in training_batches]))
+
             logger.dumpkvs()
             if update == 1 and log_folder is not None:
                 # save graph to visualize in TensorBoard

@@ -60,10 +60,9 @@ class Sampler(object):
         discounts = []
 
         for step in range(self.traj_size):
-            actions, values, mb_states, neglogpacs = self.model.step(latents, self.obs, self.states, self.dones)
+            actions, values, mb_states, neglogpacs = self.model.step(latents, self.obs, onehots, self.states, self.dones)
             # actions, values, mb_states, neglogpacs = self.model.step_from_task(
             #     self.onehots, self.obs, self.states, self.dones)
-            mb_obs.append(self.obs.copy())
             # actions = np.clip(actions, self.model.action_space.low[0], self.model.action_space.high[0])
             mb_actions.append(actions)
             mb_values.append(values)
@@ -71,6 +70,7 @@ class Sampler(object):
             mb_dones.append(self.dones)
 
             self.obs[:], rewards, self.dones, infos = self.env.step(actions)
+            mb_obs.append(self.obs.copy())
             mb_rewards.append(rewards)
 
             mb_tasks.append(infos[-1]["episode"]["task"])
@@ -109,11 +109,12 @@ class Sampler(object):
         mb_dones = np.asarray(mb_dones, dtype=np.bool)
         mb_tasks = np.asarray(mb_tasks, dtype=np.float32)
         mb_latents = np.asarray(mb_latents, dtype=np.float32)
-        last_values = self.model.value(latents, self.obs, self.states, self.dones)
+        last_values = self.model.value(latents, self.obs, onehots, self.states, self.dones)
         traj_windows = np.array(traj_windows)
         discounts = np.array(discounts)
 
         inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods = 0, [], []
+        inference_means, inference_stds = [], []
         # train and evaluate inference network
         for epoch in range(self.inference_opt_epochs):
             idxs = np.arange(self.traj_size)
@@ -123,6 +124,10 @@ class Sampler(object):
             inference_lll = self.model.inference_model.train(traj_windows[idxs], discounts[idxs], mb_latents[idxs])
             inference_loss, inference_log_likelihood, inference_discounted_log_likelihoods = tuple(inference_lll)
             inference_log_likelihoods.append(inference_log_likelihood)
+
+            inference_params = self.model.inference_model.embedding_params(traj_windows[idxs])
+            inference_means += list(inference_params[0])
+            inference_stds += list(inference_params[1])
 
         # print("MEAN reward:", np.mean(mb_rewards))
         completion_ratio = completions * 1. / self.traj_size
@@ -137,12 +142,19 @@ class Sampler(object):
                 nextnonterminal = 1.0 - self.dones
                 nextvalues = last_values
             else:
-                nextnonterminal = 1.0 - mb_dones[t + 1]
-                nextvalues = mb_values[t + 1]
+                if mb_dones[t]:
+                    # XXX reset GAE for this new trajectory piece
+                    lastgaelam = 0
+                    nextnonterminal = 0.
+                    nextvalues = mb_values[t]
+                else:
+                    nextnonterminal = 1.0 - mb_dones[t + 1]
+                    nextvalues = mb_values[t + 1]
             delta = mb_rewards[t] + self.gamma * nextvalues * nextnonterminal - mb_values[t]
             mb_advs[t] = lastgaelam = delta + self.gamma * self.lam * nextnonterminal * lastgaelam
 
         mb_returns = mb_advs + mb_values + self.inference_coef * inference_discounted_log_likelihoods.reshape(mb_advs.shape)
 
         return (*map(sf01, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs)), mb_latents,
-                mb_tasks, mb_states, epinfos, completion_ratio, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods)
+                mb_tasks, mb_states, epinfos, completion_ratio, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods,
+                inference_means, inference_stds)

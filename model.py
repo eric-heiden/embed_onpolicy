@@ -9,6 +9,23 @@ from policies import MlpEmbedPolicy
 class Model(object):
     def __init__(self, *, policy, ob_space, ac_space, task_space, latent_space, traj_size,
                  policy_entropy, vf_coef, max_grad_norm, embedding_entropy=0., inference_horizon=5, seed=None):
+
+        self.traj_size = traj_size
+        self.policy_entropy = policy_entropy
+        self.embedding_entropy = embedding_entropy
+        self.inference_horizon = inference_horizon
+        self.vf_coef = vf_coef
+        self.seed = seed
+
+        self.parameters = {
+            "traj_size": traj_size,
+            "policy_entropy": policy_entropy,
+            "embedding_entropy": embedding_entropy,
+            "inference_horizon": inference_horizon,
+            "vf_coef": vf_coef,
+            "seed": ('None' if seed is None else seed)
+        }
+
         sess = tf.get_default_session()
         inference_model = InferenceNetwork(sess, ob_space, ac_space, latent_space, horizon=inference_horizon)
         with tf.variable_scope("PPO"):
