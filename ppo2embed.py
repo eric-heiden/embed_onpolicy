@@ -121,9 +121,10 @@ def learn(*, policy, env, task_space, latent_space, traj_size,
                 completion_ratios.append(completion_ratio)
 
         train_return = model.train(lrnow, cliprangenow, training_batches)
-        train_latents = train_return[-1]
+        train_latents = train_return[-2]
+        advantages = train_return[-1]
         latent_distances = np.abs(np.array(act_latents) - np.array(train_latents))
-        mblossvals = train_return[:-1]
+        mblossvals = train_return[:-2]
 
         # if states is None:  # nonrecurrent version
         #     inds = np.arange(traj_size)
@@ -189,6 +190,7 @@ def learn(*, policy, env, task_space, latent_space, traj_size,
             logger.logkv("ppo_internals/neglogpac", safemean(neglogpacs_total))
             logger.logkv("ppo_internals/returns", safemean([b[2] for b in training_batches]))
             logger.logkv("ppo_internals/values", safemean([b[5] for b in training_batches]))
+            logger.logkv("ppo_internals/advantages", safemean(advantages))
 
             logger.dumpkvs()
             if update == 1 and log_folder is not None:

@@ -55,6 +55,7 @@ class Visualizer(object):
         gs0 = gridspec.GridSpec(ntasks, 1)
 
         latent_axes = []
+        value_axes = []
         infer_axes = []
 
         embedding_means, embedding_stds = [], []
@@ -75,7 +76,7 @@ class Visualizer(object):
 
             # plot trajectories
             # print("Plotting task", task)
-            gs00 = gridspec.GridSpecFromSubplotSpec(1, 1 + latent_dim * 2, subplot_spec=gs0[task])
+            gs00 = gridspec.GridSpecFromSubplotSpec(1, 2 + latent_dim * 2, subplot_spec=gs0[task])
             traj_ax = plt.Subplot(fig, gs00[0])
             traj_ax.set_title("Task % i" % (task + 1))
             traj_ax.grid()
@@ -98,8 +99,40 @@ class Visualizer(object):
             embedding_mean, embedding_std = embedding_means[task], embedding_stds[task]
             # print(embedding_mean, embedding_std)
 
+            # plot values / returns
+            value_ax = plt.Subplot(fig, gs00[1])
+            value_ax.set_title("values and returns")
+            value_ax.grid()
+            if task > 0:
+                value_ax.get_shared_x_axes().join(value_ax, value_axes[0])
+                value_ax.get_shared_y_axes().join(value_ax, value_axes[0])
+
+            for i, batch in enumerate(task_data[task]):
+                bs = tuple([np.array([batch[i][k] for i in range(len(batch))]) for k in range(batch_tuple_size)])
+                obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos, \
+                    inference_means, inference_stds = bs
+                xs = np.arange(0, len(obs))
+                value_ax.fill_between(xs,
+                                      returns,
+                                      values,
+                                      facecolor="orange",
+                                      alpha=.1,
+                                      zorder=1)
+                if i == 0:
+                    value_ax.plot(returns, zorder=2, color=colormap(i * 1. / nsamples), label="returns")
+                    value_ax.plot(values, '--', zorder=2, color=colormap(i * 1. / nsamples), label="values")
+                else:
+                    value_ax.plot(returns, zorder=2, color=colormap(i * 1. / nsamples))
+                    value_ax.plot(values, '--', zorder=2, color=colormap(i * 1. / nsamples))
+                # break  # TODO remove?
+            if task == 0:
+                value_ax.legend()
+
+            value_axes.append(value_ax)
+            fig.add_subplot(value_ax)
+
             # plot embeddings
-            gs10 = gridspec.GridSpecFromSubplotSpec(1, latent_dim, subplot_spec=gs00[1:1 + latent_dim])
+            gs10 = gridspec.GridSpecFromSubplotSpec(1, latent_dim, subplot_spec=gs00[2:2 + latent_dim])
             for li in range(latent_dim):
                 latent_ax = plt.Subplot(fig, gs10[li])
                 latent_ax.set_title("latent[%i]" % li)
@@ -140,8 +173,7 @@ class Visualizer(object):
                                       np.ones_like(xs) * (true_mu + true_sigma),
                                       np.ones_like(xs) * (true_mu - true_sigma),
                                       facecolor="r",
-                                      alpha=.3,
-                                      interpolate=True,
+                                      alpha=.1,
                                       zorder=1)
                 infer_ax.plot(xs, np.ones_like(xs) * true_mu, color="r", label="true", zorder=2)
 
@@ -156,8 +188,7 @@ class Visualizer(object):
                                           mus + sigmas,
                                           mus - sigmas,
                                           facecolor=colormap(i * 1. / nsamples),
-                                          alpha=.3,
-                                          interpolate=True,
+                                          alpha=.1,
                                           zorder=1)
                     infer_ax.plot(xs, mus, color=colormap(i * 1. / nsamples), marker='o', markersize=1.5, zorder=2)
                     if i > 3:

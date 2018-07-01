@@ -77,12 +77,13 @@ class PointEnv(gym.Env):
         self._step += 1
 
         distance = np.linalg.norm(self._point - self._goal)
-        done = distance < MIN_DIST # or distance > 20
-        reward = -distance
+        done = distance < MIN_DIST
+
+        reward = 1. - distance / np.linalg.norm(self._goal)
 
         # completion bonus
         if done and distance < MIN_DIST:
-            reward = 200.0
+            reward = 20.
 
         onehot = np.zeros(len(TASKS))
         onehot[self._task] = 1

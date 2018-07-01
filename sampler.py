@@ -118,8 +118,8 @@ class Sampler(object):
         # train and evaluate inference network
         for epoch in range(self.inference_opt_epochs):
             idxs = np.arange(self.traj_size)
-            if epoch < self.inference_opt_epochs - 1:
-                np.random.shuffle(idxs)
+            # if epoch < self.inference_opt_epochs - 1:
+            #     np.random.shuffle(idxs)
             # TODO shuffle the input for a better training outcome? Is this correct?!
             inference_lll = self.model.inference_model.train(traj_windows[idxs], discounts[idxs], mb_latents[idxs])
             inference_loss, inference_log_likelihood, inference_discounted_log_likelihoods = tuple(inference_lll)
@@ -137,6 +137,8 @@ class Sampler(object):
         mb_advs = np.zeros_like(mb_rewards)
         lastgaelam = 0
 
+        mb_rewards += self.inference_coef * inference_discounted_log_likelihoods.reshape(mb_rewards.shape)  # TODO use discounted LL?
+
         for t in reversed(range(self.traj_size)):
             if t == self.traj_size - 1:
                 nextnonterminal = 1.0 - self.dones
@@ -153,7 +155,7 @@ class Sampler(object):
             delta = mb_rewards[t] + self.gamma * nextvalues * nextnonterminal - mb_values[t]
             mb_advs[t] = lastgaelam = delta + self.gamma * self.lam * nextnonterminal * lastgaelam
 
-        mb_returns = mb_advs + mb_values + self.inference_coef * inference_discounted_log_likelihoods.reshape(mb_advs.shape)
+        mb_returns = mb_advs + mb_values
 
         return (*map(sf01, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs)), mb_latents,
                 mb_tasks, mb_states, epinfos, completion_ratio, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods,

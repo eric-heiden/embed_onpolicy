@@ -91,6 +91,9 @@ class Model(object):
             computed_latents = []
             gradients = None
             losses = []
+            advantages = np.array([returns - values for obs, tasks, returns, masks, actions, values, neglogpacs, states in batches]).flatten()
+            # adv_mean = advantages.mean()
+            # adv_std = advantages.std()
 
             # compute batch-wise gradients / losses
             for obs, tasks, returns, masks, actions, values, neglogpacs, states in batches:
@@ -130,7 +133,7 @@ class Model(object):
                 normalized_grads.append(np.mean(gradients[i], axis=0))
             sess.run([_train], {src_grads: normalized_grads, LR: lr, CLIPRANGE: cliprange})
 
-            return np.mean(losses, axis=0), computed_latents
+            return np.mean(losses, axis=0), computed_latents, advantages
 
         def get_latent(task: int):
             one_hot = np.zeros(act_model.Task.shape)
