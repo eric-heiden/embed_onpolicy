@@ -40,7 +40,7 @@ def learn(*, policy, env, task_space, latent_space, traj_size,
                                nbatches, total_timesteps,
           policy_entropy, embedding_entropy, inference_coef, inference_horizon, lr,
           vf_coef=0.5, max_grad_norm=0.5, gamma=0.99, lam=0.95,
-          log_interval=10, pi_opt_epochs=4, inference_opt_epochs=4, cliprange=0.2, seed=None,
+          log_interval=10, inference_opt_epochs=4, cliprange=0.2, seed=None,
           save_interval=0, load_path=None, plot_interval=50, plot_folder=None, log_folder=None):
     if isinstance(lr, float):
         lr = constfn(lr)
@@ -99,7 +99,7 @@ def learn(*, policy, env, task_space, latent_space, traj_size,
 
         inference_losses = []
         sampled_tasks = []
-        completion_ratios = []
+        completion_ratios = np.zeros(ntasks)
         neglogpacs_total = []
 
         training_batches = []
@@ -108,7 +108,7 @@ def learn(*, policy, env, task_space, latent_space, traj_size,
         for i_batch in range(nbatches):
             for task in range(ntasks):
                 obs, returns, masks, actions, values, neglogpacs, latents, tasks, states, epinfos, \
-                    completion_ratio, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods, \
+                    completions, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods, \
                     inference_means, inference_stds = sampler.run(task)
                 epinfobuf.extend(epinfos)
                 training_batches.append((obs, tasks, returns, masks, actions, values, neglogpacs, states))
@@ -118,7 +118,8 @@ def learn(*, policy, env, task_space, latent_space, traj_size,
                 act_latents.append(latents)
                 inference_losses.append(inference_loss)
                 sampled_tasks.append(tasks)
-                completion_ratios.append(completion_ratio)
+                completion_ratios[task] += completions
+        completion_ratios /= 1. * nbatches
 
         train_return = model.train(lrnow, cliprangenow, training_batches)
         train_latents = train_return[-2]

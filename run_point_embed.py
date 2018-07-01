@@ -33,7 +33,7 @@ def train(num_timesteps, seed, log_folder):
     tf.Session(config=config).__enter__()
 
     task_space = gym.spaces.Box(low=0, high=1, shape=(len(TASKS),))
-    latent_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(4,))
+    latent_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(2,))
 
     def make_env():
         env = PointEnv()
@@ -50,15 +50,14 @@ def train(num_timesteps, seed, log_folder):
                             latent_space=latent_space,
                             # nsteps=1000,
                             # nminibatches=5,
-                            traj_size=30,
-                            nbatches=3,
+                            traj_size=15,
+                            nbatches=4,
                             lam=0.95,
                             gamma=0.99,
-                            pi_opt_epochs=30,
-                            inference_opt_epochs=10,
+                            inference_opt_epochs=5,
                             log_interval=1,
-                            policy_entropy=0.01,
-                            embedding_entropy=0.001,
+                            policy_entropy=0.1,
+                            embedding_entropy=0.01,
                             inference_coef=.001,
                             inference_horizon=3,
                             lr=5e-3,

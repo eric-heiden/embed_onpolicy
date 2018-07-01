@@ -91,9 +91,13 @@ class PointEnv(gym.Env):
             "episode": {
                 "l": self._step,
                 "r": reward,
+                "d": done,
                 "task": np.copy(onehot)
             }
         }
+
+        done = False  # TODO remove
+
         return np.copy(self._point), reward, done, info
 
     def _to_screen(self, position):

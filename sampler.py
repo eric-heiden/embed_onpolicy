@@ -78,8 +78,8 @@ class Sampler(object):
 
             epinfos += [info["episode"] for info in infos]
 
-            if any(self.dones):
-                self.obs[:] = self.env.reset()
+            # if any(self.dones):
+                # self.obs[:] = self.env.reset()
                 # self.tasks = [e.task for e in self.env.envs]
                 # self.onehots = []
                 # for task in self.tasks:
@@ -88,17 +88,24 @@ class Sampler(object):
                 #     self.onehots.append(np.copy(one_hot))
                 # self.latents = [self.model.get_latent(t) for t in self.tasks]
 
-                completions += 1
-            if any(self.dones) or step == 0:
+            if step == 0:
                 # fill horizon buffer with step 0 copies of trajectory
                 for _ in range(self.model.inference_model.horizon):
-                    traj_window.append(np.concatenate((self.obs, actions)))
+                    traj_window.append(np.concatenate((self.obs.copy(), actions)))
                 discounts.append(self.gamma)
             else:
                 discounts.append(discounts[-1] * self.gamma)
 
-            traj_window.append(np.concatenate((self.obs, actions)))
+            traj_window.append(np.concatenate((self.obs.copy(), actions)))
             traj_windows.append(np.array(traj_window).flatten())
+
+            # if any(self.dones) and step < self.traj_size-1:
+            #     self.obs[:] = self.env.reset()
+            #     for _ in range(self.model.inference_model.horizon):
+            #         traj_window.append(np.concatenate((self.obs.copy(), actions)))
+            #     discounts.append(self.gamma)
+            if any([info["episode"]["d"] for info in infos]):
+                completions = 1
 
         # batch of steps to batch of rollouts
         mb_obs = np.asarray(mb_obs, dtype=self.obs.dtype)
@@ -129,9 +136,6 @@ class Sampler(object):
             inference_means += list(inference_params[0])
             inference_stds += list(inference_params[1])
 
-        # print("MEAN reward:", np.mean(mb_rewards))
-        completion_ratio = completions * 1. / self.traj_size
-
         # discount/bootstrap off value fn
         # mb_returns = np.zeros_like(mb_rewards)
         mb_advs = np.zeros_like(mb_rewards)
@@ -144,19 +148,19 @@ class Sampler(object):
                 nextnonterminal = 1.0 - self.dones
                 nextvalues = last_values
             else:
-                if mb_dones[t]:
-                    # XXX reset GAE for this new trajectory piece
-                    lastgaelam = 0
-                    nextnonterminal = 0.
-                    nextvalues = mb_values[t]
-                else:
-                    nextnonterminal = 1.0 - mb_dones[t + 1]
-                    nextvalues = mb_values[t + 1]
+                # if mb_dones[t]:
+                #     # XXX reset GAE for this new trajectory piece
+                #     lastgaelam = 0
+                #     nextnonterminal = 0.
+                #     nextvalues = mb_values[t]
+                # else:
+                nextnonterminal = 1.0 - mb_dones[t + 1]
+                nextvalues = mb_values[t + 1]
             delta = mb_rewards[t] + self.gamma * nextvalues * nextnonterminal - mb_values[t]
             mb_advs[t] = lastgaelam = delta + self.gamma * self.lam * nextnonterminal * lastgaelam
 
         mb_returns = mb_advs + mb_values
 
         return (*map(sf01, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs)), mb_latents,
-                mb_tasks, mb_states, epinfos, completion_ratio, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods,
+                mb_tasks, mb_states, epinfos, completions, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods,
                 inference_means, inference_stds)

@@ -26,6 +26,7 @@ class Visualizer(object):
     def visualize(self, update: int, batches):
         ntasks = len(point_env.TASKS)
         nbins = 100
+        nactions = self.env.action_space.shape[0]
         latent_dim = self.model.latent_space.shape[0]
         batch_tuple_size = 11
         colormap = lambda x: matplotlib.cm.get_cmap("winter")(1. - x)
@@ -49,12 +50,13 @@ class Visualizer(object):
         title += ' (%s distribution)' % ('Normal', 'Beta')[int(self.model.use_beta)]
         title += ' { ' + ', '.join("%s: %f" % (key, value) for key, value in self.model.parameters.items()) + ' }'
 
-        fig = plt.figure(figsize=(latent_dim * 6 + 3, ntasks * 3))
+        fig = plt.figure(figsize=(latent_dim * 6 + 2 + nactions * 2, ntasks * 3))
         fig.suptitle(title)
 
         gs0 = gridspec.GridSpec(ntasks, 1)
 
         latent_axes = []
+        action_axes = []
         value_axes = []
         infer_axes = []
 
@@ -76,9 +78,9 @@ class Visualizer(object):
 
             # plot trajectories
             # print("Plotting task", task)
-            gs00 = gridspec.GridSpecFromSubplotSpec(1, 2 + latent_dim * 2, subplot_spec=gs0[task])
+            gs00 = gridspec.GridSpecFromSubplotSpec(1, 2 + latent_dim * 2 + nactions, subplot_spec=gs0[task])
             traj_ax = plt.Subplot(fig, gs00[0])
-            traj_ax.set_title("Task % i" % (task + 1))
+            traj_ax.set_title("Task %i" % (task + 1))
             traj_ax.grid()
             traj_ax.set_xlim([-5, 5])
             traj_ax.set_ylim([-5, 5])
@@ -97,10 +99,30 @@ class Visualizer(object):
             fig.add_subplot(traj_ax)
 
             embedding_mean, embedding_std = embedding_means[task], embedding_stds[task]
-            # print(embedding_mean, embedding_std)
+
+            # plot actions
+            for da in range(self.env.action_space.shape[0]):
+                action_ax = plt.Subplot(fig, gs00[1 + da])
+                action_ax.set_title("action[%i]" % da)
+                action_ax.grid()
+                if da > 0 or task > 0:
+                    action_ax.get_shared_x_axes().join(action_ax, action_axes[0])
+                    action_ax.get_shared_y_axes().join(action_ax, action_axes[0])
+
+                action_ax.axhline(self.env.action_space.low[da], zorder=2, linewidth=2, color="r")
+                action_ax.axhline(self.env.action_space.high[da], zorder=2, linewidth=2, color="r")
+
+                for i, batch in enumerate(task_data[task]):
+                    bs = tuple([np.array([batch[i][k] for i in range(len(batch))]) for k in range(batch_tuple_size)])
+                    obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos, \
+                        inference_means, inference_stds = bs
+                    action_ax.plot(actions[:, da], '.-', zorder=2, color=colormap(i * 1. / nsamples))
+
+                action_axes.append(action_ax)
+                fig.add_subplot(action_ax)
 
             # plot values / returns
-            value_ax = plt.Subplot(fig, gs00[1])
+            value_ax = plt.Subplot(fig, gs00[1 + nactions])
             value_ax.set_title("values and returns")
             value_ax.grid()
             if task > 0:
@@ -116,9 +138,9 @@ class Visualizer(object):
                                       returns,
                                       values,
                                       facecolor="orange",
-                                      alpha=.1,
+                                      alpha=.2,
                                       zorder=1)
-                if i == 0:
+                if i == len(task_data[task]) - 1:
                     value_ax.plot(returns, zorder=2, color=colormap(i * 1. / nsamples), label="returns")
                     value_ax.plot(values, '--', zorder=2, color=colormap(i * 1. / nsamples), label="values")
                 else:
@@ -132,7 +154,7 @@ class Visualizer(object):
             fig.add_subplot(value_ax)
 
             # plot embeddings
-            gs10 = gridspec.GridSpecFromSubplotSpec(1, latent_dim, subplot_spec=gs00[2:2 + latent_dim])
+            gs10 = gridspec.GridSpecFromSubplotSpec(1, latent_dim, subplot_spec=gs00[2 + nactions:2 + latent_dim + nactions])
             for li in range(latent_dim):
                 latent_ax = plt.Subplot(fig, gs10[li])
                 latent_ax.set_title("latent[%i]" % li)
