@@ -222,4 +222,11 @@ class Visualizer(object):
 
         fig.tight_layout(rect=[0, 0.03, 1, 0.95])
         fig.savefig(osp.join(self.plot_folder, 'embed_%05d.png' % update))
+
+        expand = True
+        fig.canvas.draw()
+        buf = fig.canvas.tostring_rgb()
+        ncols, nrows = fig.canvas.get_width_height()
+        shape = (nrows, ncols, 3) if not expand else (-1, nrows, ncols, 3)
+        return np.fromstring(buf, dtype=np.uint8).reshape(shape)
         # plt.clf()

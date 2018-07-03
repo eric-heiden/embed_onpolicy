@@ -1,16 +1,12 @@
 import os
 import sys
 import time
-import joblib
 import numpy as np
 import os.path as osp
 import tensorflow as tf
 
 import point_env
-from inference_net import InferenceNetwork
 from model import Model
-from point_env import PointEnv
-from policies import MlpEmbedPolicy
 from sampler import Sampler
 from visualizer import Visualizer
 
@@ -19,8 +15,6 @@ sys.path.insert(0, osp.join(osp.dirname(__file__), 'baselines'))
 from baselines import logger
 from collections import deque
 from baselines.common import explained_variance
-from baselines.common.vec_env.dummy_vec_env import DummyVecEnv
-from baselines.common.vec_env.vec_normalize import VecNormalize
 
 
 def constfn(val):
@@ -89,6 +83,15 @@ def learn(*, policy, env, task_space, latent_space, traj_size,
 
     epinfobuf = deque(maxlen=100)
     tfirststart = time.time()
+
+    summary_writer = tf.summary.FileWriter(logdir=osp.join(log_folder, "tb"), graph=tf.get_default_graph())
+    vis_placeholder = None
+    vis_summary = None
+
+    def log(key, value, update):
+        logger.logkv(key, value)
+        summary_writer.add_summary(tf.Summary(value=[tf.Summary.Value(tag=key,
+                                                                      simple_value=value)]), update)
 
     nupdates = total_timesteps // traj_size
     for update in range(1, nupdates + 1):
@@ -170,37 +173,38 @@ def learn(*, policy, env, task_space, latent_space, traj_size,
         lossvals = np.mean(mblossvals, axis=0)
         tnow = time.time()
         fps = int(traj_size / (tnow - tstart))
-        if update % log_interval == 0 or update == 1:
-            # ev = explained_variance(values, returns)
-            # logger.logkv("explained_variance", float(ev))
-            # logger.logkv("nupdates", update)
-            # logger.logkv("total_timesteps", update * nbatch)
-            logger.logkv("fps", fps)
-            for t in range(ntasks):
-                logger.logkv("completion_ratio/task%i" % t, safemean(completion_ratios[t::ntasks]))
-            logger.logkv("latent_sample_error", latent_distances)
-            logger.logkv("episode/reward", safemean([epinfo['r'] for epinfo in epinfobuf]))
-            logger.logkv("episode/length", safemean([epinfo['l'] for epinfo in epinfobuf]))
-            for t in range(task_space.shape[0]):
-                logger.logkv("sampled_task/%i" % t, np.sum(sampled_tasks[:, t]))
-            logger.logkv('time_elapsed', tnow - tfirststart)
-            for (lossval, lossname) in zip(lossvals, model.loss_names):
-                logger.logkv("loss/%s" % lossname, lossval)
-            logger.logkv("loss/inference_net", safemean(inference_losses))
-
-            logger.logkv("ppo_internals/neglogpac", safemean(neglogpacs_total))
-            logger.logkv("ppo_internals/returns", safemean([b[2] for b in training_batches]))
-            logger.logkv("ppo_internals/values", safemean([b[5] for b in training_batches]))
-            logger.logkv("ppo_internals/advantages", safemean(advantages))
-
-            logger.dumpkvs()
-            if update == 1 and log_folder is not None:
-                # save graph to visualize in TensorBoard
-                writer = tf.summary.FileWriter(logdir=log_folder, graph=tf.get_default_graph())
-                writer.add_graph(tf.get_default_graph())
-                writer.flush()
         if plot_interval and (update % plot_interval == 0 or update == 1):
-            visualizer.visualize(update, visualization_batches)
+            image = visualizer.visualize(update, visualization_batches)
+            if update == 1:
+                vis_placeholder = tf.placeholder(tf.uint8, image.shape)
+                vis_summary = tf.summary.image('episode_microscope', vis_placeholder)
+            summary_writer.add_summary(vis_summary.eval(feed_dict={vis_placeholder: image}), update)
+        if update % log_interval == 0 or update == 1:
+            with tf.name_scope('summaries'):
+                # ev = explained_variance(values, returns)
+                # logger.logkv("explained_variance", float(ev))
+                # logger.logkv("nupdates", update)
+                # logger.logkv("total_timesteps", update * nbatch)
+                log("fps", fps, update)
+                for t in range(ntasks):
+                    log("completion_ratio/task%i" % t, safemean(completion_ratios[t::ntasks]), update)
+                log("latent_sample_error", latent_distances, update)
+                log("episode/reward", safemean([epinfo['r'] for epinfo in epinfobuf]), update)
+                log("episode/length", safemean([epinfo['l'] for epinfo in epinfobuf]), update)
+                for t in range(task_space.shape[0]):
+                    log("sampled_task/%i" % t, np.sum(sampled_tasks[:, t]), update)
+                log('time_elapsed', tnow - tfirststart, update)
+                for (lossval, lossname) in zip(lossvals, model.loss_names):
+                    log("loss/%s" % lossname, lossval, update)
+                log("loss/inference_net", safemean(inference_losses), update)
+
+                log("ppo_internals/neglogpac", safemean(neglogpacs_total), update)
+                log("ppo_internals/returns", safemean([b[2] for b in training_batches]), update)
+                log("ppo_internals/values", safemean([b[5] for b in training_batches]), update)
+                log("ppo_internals/advantages", safemean(advantages), update)
+
+                logger.dumpkvs()
+                summary_writer.flush()
         if save_interval and (update % save_interval == 0 or update == 1) and logger.get_dir():
             checkdir = osp.join(logger.get_dir(), 'checkpoints')
             os.makedirs(checkdir, exist_ok=True)
