@@ -4,8 +4,8 @@ import time
 import numpy as np
 import os.path as osp
 import tensorflow as tf
+from collections import deque
 
-import point_env
 from model import Model
 from sampler import Sampler
 from visualizer import Visualizer
@@ -13,8 +13,6 @@ from visualizer import Visualizer
 sys.path.insert(0, osp.join(osp.dirname(__file__), 'baselines'))
 
 from baselines import logger
-from collections import deque
-from baselines.common import explained_variance
 
 
 def constfn(val):
@@ -35,7 +33,8 @@ def learn(*, policy, env, task_space, latent_space, traj_size,
           policy_entropy, embedding_entropy, inference_coef, inference_horizon, lr,
           vf_coef=0.5, max_grad_norm=0.5, gamma=0.99, lam=0.95,
           log_interval=10, inference_opt_epochs=4, cliprange=0.2, seed=None,
-          save_interval=0, load_path=None, plot_interval=50, plot_folder=None, log_folder=None):
+          save_interval=0, load_path=None, plot_interval=50, plot_folder=None, traj_plot_fn=None, log_folder=None,
+          **kwargs):
     if isinstance(lr, float):
         lr = constfn(lr)
     else:
@@ -53,19 +52,16 @@ def learn(*, policy, env, task_space, latent_space, traj_size,
     nenvs = env.num_envs
     ob_space = env.observation_space
     ac_space = env.action_space
-    # nbatch = nenvs * nsteps
-    # nbatch_train = nbatch // nminibatches
 
     make_model = lambda: Model(policy=policy, ob_space=ob_space, ac_space=ac_space,
                                task_space=task_space, latent_space=latent_space,
-                               # nbatch_act=nenvs,
-                               # nbatch_train=nbatch_train,
                                traj_size=traj_size,
                                policy_entropy=policy_entropy,
                                embedding_entropy=embedding_entropy,
                                inference_horizon=inference_horizon,
                                vf_coef=vf_coef,
-                               max_grad_norm=max_grad_norm, seed=seed)
+                               max_grad_norm=max_grad_norm, seed=seed,
+                               **kwargs)
     if save_interval and logger.get_dir():
         import cloudpickle
         with open(osp.join(logger.get_dir(), 'make_model.pkl'), 'wb') as fh:
@@ -77,9 +73,9 @@ def learn(*, policy, env, task_space, latent_space, traj_size,
     sampler = Sampler(env=env, model=model, traj_size=traj_size, inference_opt_epochs=inference_opt_epochs,
                       inference_coef=inference_coef, gamma=gamma, lam=lam)
 
-    visualizer = Visualizer(model, env, plot_folder)
+    visualizer = Visualizer(model, env, plot_folder, traj_plot_fn)
 
-    ntasks = len(point_env.TASKS)
+    ntasks = task_space.shape[0]
 
     epinfobuf = deque(maxlen=100)
     tfirststart = time.time()

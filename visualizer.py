@@ -1,4 +1,5 @@
 import copy
+from typing import Callable
 
 import numpy as np
 
@@ -14,22 +15,24 @@ matplotlib.rcParams['pdf.fonttype'] = 42
 matplotlib.rcParams['ps.fonttype'] = 42
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+
 import os.path as osp
 
 
 class Visualizer(object):
-    def __init__(self, model: Model, env: DummyVecEnv, plot_folder: str):
+    def __init__(self, model: Model, env: DummyVecEnv, plot_folder: str, traj_plot_fn: Callable[..., None]):
         self.model = model
         self.env = env
         self.plot_folder = plot_folder
+        self.traj_plot_fn = traj_plot_fn
 
     def visualize(self, update: int, batches):
-        ntasks = len(point_env.TASKS)
+        ntasks = self.model.task_space.shape[0]
         nbins = 100
         nactions = self.env.action_space.shape[0]
         latent_dim = self.model.latent_space.shape[0]
         batch_tuple_size = 11
-        colormap = lambda x: matplotlib.cm.get_cmap("winter")(1. - x)
+        colormap = lambda x: matplotlib.cm.get_cmap("rainbow")(1. - x)
 
         task_data_prior = [batches[t::ntasks] for t in range(ntasks)]  # batches grouped by task id
         task_data = [[] for _ in range(ntasks)]
@@ -50,7 +53,7 @@ class Visualizer(object):
         title += ' (%s distribution)' % ('Normal', 'Beta')[int(self.model.use_beta)]
         title += ' { ' + ', '.join("%s: %f" % (key, value) for key, value in self.model.parameters.items()) + ' }'
 
-        fig = plt.figure(figsize=(latent_dim * 6 + 2 + nactions * 2, ntasks * 3))
+        fig = plt.figure(figsize=(latent_dim * 6 + 4 + nactions * 4, ntasks * 3))
         fig.suptitle(title)
 
         gs0 = gridspec.GridSpec(ntasks, 1)
@@ -77,26 +80,10 @@ class Visualizer(object):
             nsamples = float(len(task_data[task]))
 
             # plot trajectories
-            # print("Plotting task", task)
             gs00 = gridspec.GridSpecFromSubplotSpec(1, 2 + latent_dim * 2 + nactions, subplot_spec=gs0[task])
-            traj_ax = plt.Subplot(fig, gs00[0])
-            traj_ax.set_title("Task %i" % (task + 1))
-            traj_ax.grid()
-            traj_ax.set_xlim([-5, 5])
-            traj_ax.set_ylim([-5, 5])
-            traj_ax.set_aspect('equal')
-            goal = plt.Circle(point_env.TASKS[task], radius=point_env.MIN_DIST, color='orange')
-            traj_ax.add_patch(goal)
-            for tl in traj_ax.get_xticklabels() + traj_ax.get_yticklabels():
-                tl.set_visible(False)
 
-            for i, batch in enumerate(task_data[task]):
-                bs = tuple([np.array([batch[i][k] for i in range(len(batch))]) for k in range(batch_tuple_size)])
-                obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos, \
-                    inference_means, inference_stds = bs
-                traj_ax.plot([0] + obs[:, 0], [0] + obs[:, 1], color=colormap(i * 1. / nsamples),
-                             zorder=2, linewidth=.5, marker='o', markersize=1)
-            fig.add_subplot(traj_ax)
+            if self.traj_plot_fn is not None:
+                self.traj_plot_fn(fig, gs00[0], task, batch_tuple_size, task_data[task], colormap)
 
             embedding_mean, embedding_std = embedding_means[task], embedding_stds[task]
 

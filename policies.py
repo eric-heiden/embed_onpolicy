@@ -69,7 +69,8 @@ class MlpPolicy(object):
 
 class MlpEmbedPolicy(object):
     def __init__(self, sess: tf.Session, ob_space: Box, ac_space: Box, task_space: Box, latent_space: Box,
-                 traj_size, reuse=False, name="model", use_beta=False, seed=None):
+                 traj_size, reuse=False, name="model", use_beta=False, seed=None,
+                 em_hidden_layers=(8,), pi_hidden_layers=(16, 16), vf_hidden_layers=(16, 16)):
 
         with tf.variable_scope(name, reuse=reuse):
             # task input
@@ -83,22 +84,22 @@ class MlpEmbedPolicy(object):
 
             # embedding network (with task as input)
             with tf.name_scope("embedding"):
-                em_h1 = tf.tanh(fc(processed_t, 'embed_fc1', nh=8, init_scale=0.5), name="em_h1")
-                em_h2 = tf.tanh(fc(em_h1, 'embed_fc2', nh=latent_space.shape[0], init_scale=0.5), name="em_h2")
+                layer_in = processed_t
+                for i, units in enumerate(em_hidden_layers):
+                    em_h = tf.tanh(fc(layer_in, 'embed_fc%i' % (i+1), nh=units, init_scale=0.5), name="em_h%i" % (i+1))
+                    layer_in = em_h
+                em_h = tf.tanh(fc(layer_in, 'embed_fc', nh=latent_space.shape[0], init_scale=0.5), name="em_h")
                 em_logstd = tf.get_variable(name='em_logstd', shape=[1, latent_space.shape[0]],
-                                         initializer=tf.zeros_initializer(), trainable=True)
+                                            initializer=tf.zeros_initializer(), trainable=True)
                 em_std = tf.exp(em_logstd, name="em_std")
-                self.em_pd = tf.distributions.Normal(em_h2, em_std, name="embedding", validate_args=True)
+                self.em_pd = tf.distributions.Normal(em_h, em_std, name="embedding", validate_args=False)
 
                 self.embedding_mean = self.em_pd.mean("embedding_mean")
                 self.embedding_std = self.em_pd.stddev("embedding_std")
 
                 # embedding variable
-                # Embedding = self.em_pd.sample(name="em", seed=seed)
                 Embedding = self.em_pd.sample(name="em", seed=seed)
                 Embedding = tf.tile(Embedding, (traj_size, 1), name="tiled_embedding")
-                # Embedding = self.em_pd.sample(name="em")  # tf.Variable(tf.zeros((nbatch,) + latent_space.shape), dtype=latent_space.dtype, name="embedding")
-                # tf.assign(Embedding, em_h2, name="embedding_from_task")
 
             with tf.name_scope("embedding_entropy"):
                 embedding_entropy = tf.reduce_mean(self.em_pd.entropy(), name="embedding_entropy")
@@ -107,31 +108,32 @@ class MlpEmbedPolicy(object):
             em_ob = tf.concat((Embedding, processed_ob), axis=1, name="em_ob")
 
             # policy
+            pi_input = em_ob
             with tf.name_scope("pi"):
-                pi_h1 = tf.tanh(fc(em_ob, 'pi_fc1', nh=16, init_scale=np.sqrt(2)), name="pi_h1")
-                pi_h2 = tf.tanh(fc(pi_h1, 'pi_fc2', nh=16, init_scale=1.), name="pi_h2")
-                # pi_h2 = tf.clip_by_value(pi_h2, ac_space.low[0], ac_space.high[0])
+                for i, units in enumerate(pi_hidden_layers):
+                    pi_h = tf.tanh(fc(pi_input, 'pi_fc%i' % (i+1), nh=units, init_scale=np.sqrt(2)), name="pi_h%i" % (i+1))
+                    pi_input = pi_h
 
             # value function
             with tf.name_scope("vf"):
                 tiled_t = tf.tile(Task, (traj_size, 1), name="tiled_task")
-                ob_task = tf.concat((processed_ob, tiled_t), axis=1, name="ob_task")
-                # em_ob_task = tf.concat((Embedding, processed_ob, tiled_t), axis=1, name="em_ob_task")
-                # TODO input should be em_ob
-                vf_h1 = tf.tanh(fc(ob_task, 'vf_fc1', nh=16, init_scale=np.sqrt(2)), name="vf_h1")
-                vf_h2 = tf.tanh(fc(vf_h1, 'vf_fc2', nh=16, init_scale=np.sqrt(2)), name="vf_h2")
-                vf = fc(vf_h2, 'vf', 1)[:, 0]
+                vf_input = tf.concat((processed_ob, tiled_t), axis=1, name="ob_task")
+                # vf_input = tf.concat((Embedding, processed_ob, tiled_t), axis=1, name="em_ob_task")
+                for i, units in enumerate(vf_hidden_layers):
+                    vf_h = tf.tanh(fc(vf_input, 'vf_fc%i' % (i+1), nh=units, init_scale=np.sqrt(2)), name="vf_h%i" % (i+1))
+                    vf_input = vf_h
+                vf = fc(vf_input, 'vf', 1)[:, 0]
 
             if use_beta:
                 # use Beta distribution
                 with tf.name_scope("PolicyDist_beta"):
-                    alpha = tf.nn.softplus(fc(pi_h2, 'pi_alpha1', ac_space.shape[0], init_scale=1., init_bias=1.), name='pi_alpha')
-                    beta = tf.nn.softplus(fc(pi_h2, 'pi_beta1', ac_space.shape[0], init_scale=1., init_bias=1.), name='pi_beta')
-                    self.pd = tf.distributions.Beta(alpha + 1. +  EPS, beta + 1. + EPS, validate_args=True, name="PolicyDist_beta")
+                    alpha = tf.nn.softplus(fc(pi_input, 'pi_alpha1', ac_space.shape[0], init_scale=1., init_bias=1.), name='pi_alpha')
+                    beta = tf.nn.softplus(fc(pi_input, 'pi_beta1', ac_space.shape[0], init_scale=1., init_bias=1.), name='pi_beta')
+                    self.pd = tf.distributions.Beta(alpha + 1. + EPS, beta + 1. + EPS, validate_args=False, name="PolicyDist_beta")
             else:
                 # use Gaussian distribution
                 with tf.name_scope("PolicyDist_normal"):
-                    mean = fc(pi_h2, 'pi', ac_space.shape[0], init_scale=0.01, init_bias=0.)
+                    mean = fc(pi_input, 'pi', ac_space.shape[0], init_scale=0.01, init_bias=0.)
                     logstd = tf.get_variable(name='pi_logstd', shape=[1, ac_space.shape[0]],
                                              initializer=tf.zeros_initializer(), trainable=True)
                     std = tf.exp(logstd)
@@ -139,7 +141,6 @@ class MlpEmbedPolicy(object):
 
             with tf.name_scope("action"):
                 action = self.pd.sample(name="action", seed=seed)
-                # action = self.pd.mean(name="action")
 
             if use_beta:
                 with tf.name_scope("transform_action"):
