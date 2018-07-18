@@ -3,8 +3,6 @@ import tensorflow as tf
 from gym.spaces import Discrete, Box
 from baselines.a2c.utils import conv, fc, conv_to_fc, batch_to_seq, seq_to_batch, lstm, lnlstm
 from baselines.common.distributions import make_pdtype
-from baselines import bench, logger
-
 
 EPS = 1e-7
 
@@ -79,7 +77,7 @@ class MlpEmbedPolicy(object):
                 processed_t = tf.layers.flatten(processed_t, "flattened_t")
 
             # observation input
-            Observation, processed_ob = space_input(ob_space, traj_size, name="ob")
+            Observation, processed_ob = space_input(ob_space, None, name="ob")
             processed_ob = tf.layers.flatten(processed_ob, name="flattened_ob")
 
             # embedding network (with task as input)
@@ -99,13 +97,13 @@ class MlpEmbedPolicy(object):
 
                 # embedding variable
                 Embedding = self.em_pd.sample(name="em", seed=seed)
-                Embedding = tf.tile(Embedding, (traj_size, 1), name="tiled_embedding")
+                self.tiled_em = tf.tile(Embedding, (traj_size, 1), name="tiled_embedding")[:tf.shape(Observation)[0]]
 
             with tf.name_scope("embedding_entropy"):
                 embedding_entropy = tf.reduce_mean(self.em_pd.entropy(), name="embedding_entropy")
 
             # embedding + observation input
-            em_ob = tf.concat((Embedding, processed_ob), axis=1, name="em_ob")
+            em_ob = tf.concat((self.tiled_em, processed_ob), axis=1, name="em_ob")
 
             # policy
             pi_input = em_ob
@@ -116,7 +114,7 @@ class MlpEmbedPolicy(object):
 
             # value function
             with tf.name_scope("vf"):
-                tiled_t = tf.tile(Task, (traj_size, 1), name="tiled_task")
+                tiled_t = tf.tile(Task, (traj_size, 1), name="tiled_task")[:tf.shape(Observation)[0]]
                 vf_input = tf.concat((processed_ob, tiled_t), axis=1, name="ob_task")
                 # vf_input = tf.concat((Embedding, processed_ob, tiled_t), axis=1, name="em_ob_task")
                 for i, units in enumerate(vf_hidden_layers):
@@ -142,9 +140,9 @@ class MlpEmbedPolicy(object):
             with tf.name_scope("action"):
                 action = self.pd.sample(name="action", seed=seed)
 
+            l, h = ac_space.low, ac_space.high
             if use_beta:
                 with tf.name_scope("transform_action"):
-                    l, h = ac_space.low[0], ac_space.high[0]
                     action = action * (h - l) + l
 
             def neg_log_prob(var: tf.Tensor, var_name="var"):
@@ -161,6 +159,7 @@ class MlpEmbedPolicy(object):
         def step(latent, ob, task, *_args, **_kwargs):
             # XXX task is only fed for the value function!
             a, v, neglogp = sess.run([action, vf, neglogp0], {Observation: ob, Embedding: latent, Task: task})
+            # print("Observation len: ", l, " true:", np.shape(ob))
             return a, v, self.initial_state, neglogp
 
         def step_from_task(task, ob, *_args, **_kwargs):

@@ -4,7 +4,6 @@ from collections import deque
 
 from baselines.common.vec_env.dummy_vec_env import DummyVecEnv
 
-import point_env
 from model import Model
 
 
@@ -18,11 +17,12 @@ def sf01(arr):
 
 class Sampler(object):
 
-    def __init__(self, *, env: DummyVecEnv, model: Model, gamma, lam, traj_size: int = 20, inference_opt_epochs: int = 4, inference_coef: float = 0.1):
+    def __init__(self, *, env: DummyVecEnv, model: Model, gamma, lam, traj_size: int = 20,
+                 inference_opt_epochs: int = 4, inference_coef: float = 0.1):
         self.env = env
         self.model = model
         nenv = env.num_envs
-        assert(nenv == 1)  # ensure to sample from embedding the same number of steps, in training and acting
+        assert (nenv == 1)  # ensure to sample from embedding the same number of steps, in training and acting
 
         self.batch_ob_shape = (nenv * traj_size,) + env.observation_space.shape
         self.obs = np.zeros((nenv,) + env.observation_space.shape, dtype=env.observation_space.dtype.name)
@@ -36,22 +36,28 @@ class Sampler(object):
         self.inference_opt_epochs = inference_opt_epochs
         self.inference_coef = inference_coef
 
-    def run(self, task: int):
+    def run(self, env: DummyVecEnv, task: int, render=None):
         mb_obs, mb_rewards, mb_actions, mb_latents, mb_tasks, mb_values, mb_dones, mb_neglogpacs = \
             [], [], [], [], [], [], [], []
         mb_states = self.states
 
         onehots = []
         latents = []
+        one_hot = np.zeros((self.model.task_space.shape[0],))
+        one_hot[task] = 1
         for _ in range(self.env.num_envs):
-            one_hot = np.zeros((self.model.task_space.shape[0],))
-            one_hot[task] = 1
             onehots.append(one_hot)
             latents.append(self.model.get_latent(task))
 
-        for env in self.env.envs:  # type: point_env.PointEnv
-            env.select_task(task)
-            self.obs[:] = env.reset()
+        # TODO scrap DummyVecEnv
+        assert len(env.envs) == 1
+        env = env.envs[0]
+
+        # for _env in env.envs:
+        #     # env.select_task(task)
+        #     self.obs[:] = _env.reset()
+        env.reset()
+        # print("Sampling task", env.task, env.start_position, env.position)
 
         epinfos = []
         completions = 0
@@ -59,44 +65,74 @@ class Sampler(object):
         traj_windows = []
         discounts = []
 
+        video = []
+
+        # cumulative stats
+        c_obs = []
+        c_actions = []
+        c_values = []
+        c_rewards = []
+        c_infos = []
+
+        traj_len = 0
+
         for step in range(self.traj_size):
-            actions, values, mb_states, neglogpacs = self.model.step(latents, self.obs, onehots, self.states, self.dones)
+            traj_len += 1
+            actions, values, mb_states, neglogpacs = self.model.step(latents, self.obs, onehots, self.states,
+                                                                     self.dones)
+            # TODO revert (the policy is "blind" now)
+            # actions, values, mb_states, neglogpacs = self.model.step(latents, np.zeros_like(self.obs), onehots, self.states,
+            #                                                          self.dones)
             # actions, values, mb_states, neglogpacs = self.model.step_from_task(
             #     self.onehots, self.obs, self.states, self.dones)
             # actions = np.clip(actions, self.model.action_space.low[0], self.model.action_space.high[0])
-            mb_actions.append(actions)
+            mb_actions.append(actions[0])
             mb_values.append(values)
             mb_neglogpacs.append(neglogpacs)
             mb_dones.append(self.dones)
 
-            self.obs[:], rewards, self.dones, infos = self.env.step(actions)
-            mb_obs.append(self.obs.copy())
+            self.obs[:], rewards, self.dones, infos = env.step(actions)
+
+            if render:
+                c_obs.append(self.obs.copy())
+                c_actions.append(actions)
+                c_values.append(values)
+                c_rewards.append(rewards)
+                c_infos.append(infos)
+
+            if render:
+                video.append(render(env, c_obs, c_actions, c_values, c_rewards, c_infos))
+
+            mb_obs.append(self.obs[0].copy())
             mb_rewards.append(rewards)
 
-            mb_tasks.append(infos[-1]["episode"]["task"])
+            mb_tasks.append(infos["episode"]["task"])
+            # if not np.array_equal(infos["episode"]["task"], one_hot):
+            #     raise Exception("env_task != sample_task", infos["episode"]["task"], one_hot)
             mb_latents.append(np.array(latents).flatten())
 
-            epinfos += [info["episode"] for info in infos]
+            # epinfos += [info["episode"] for info in infos]
+            epinfos.append(infos["episode"])
 
             # if any(self.dones):
-                # self.obs[:] = self.env.reset()
-                # self.tasks = [e.task for e in self.env.envs]
-                # self.onehots = []
-                # for task in self.tasks:
-                #     one_hot = np.zeros((self.model.task_space.shape[0],))
-                #     one_hot[task] = 1
-                #     self.onehots.append(np.copy(one_hot))
-                # self.latents = [self.model.get_latent(t) for t in self.tasks]
+            # self.obs[:] = self.env.reset()
+            # self.tasks = [e.task for e in self.env.envs]
+            # self.onehots = []
+            # for task in self.tasks:
+            #     one_hot = np.zeros((self.model.task_space.shape[0],))
+            #     one_hot[task] = 1
+            #     self.onehots.append(np.copy(one_hot))
+            # self.latents = [self.model.get_latent(t) for t in self.tasks]
 
             if step == 0:
                 # fill horizon buffer with step 0 copies of trajectory
                 for _ in range(self.model.inference_model.horizon):
-                    traj_window.append(np.concatenate((self.obs.copy(), actions)))
+                    traj_window.append(np.concatenate((self.obs.flatten(), actions.flatten())))
                 discounts.append(self.gamma)
             else:
                 discounts.append(discounts[-1] * self.gamma)
 
-            traj_window.append(np.concatenate((self.obs.copy(), actions)))
+            traj_window.append(np.concatenate((self.obs.flatten(), actions.flatten())))
             traj_windows.append(np.array(traj_window).flatten())
 
             # if any(self.dones) and step < self.traj_size-1:
@@ -104,15 +140,16 @@ class Sampler(object):
             #     for _ in range(self.model.inference_model.horizon):
             #         traj_window.append(np.concatenate((self.obs.copy(), actions)))
             #     discounts.append(self.gamma)
-            if any([info["episode"]["d"] for info in infos]):
+            if infos["episode"]["d"]:
                 completions = 1
+                break
 
         # batch of steps to batch of rollouts
         mb_obs = np.asarray(mb_obs, dtype=self.obs.dtype)
         mb_rewards = np.asarray(mb_rewards, dtype=np.float32)
         mb_actions = np.asarray(mb_actions)
-        mb_values = np.asarray(mb_values, dtype=np.float32)
-        mb_neglogpacs = np.asarray(mb_neglogpacs, dtype=np.float32)
+        mb_values = np.asarray(mb_values, dtype=np.float32).flatten()
+        mb_neglogpacs = np.asarray(mb_neglogpacs, dtype=np.float32).flatten()
         mb_dones = np.asarray(mb_dones, dtype=np.bool)
         mb_tasks = np.asarray(mb_tasks, dtype=np.float32)
         mb_latents = np.asarray(mb_latents, dtype=np.float32)
@@ -124,7 +161,7 @@ class Sampler(object):
         inference_means, inference_stds = [], []
         # train and evaluate inference network
         for epoch in range(self.inference_opt_epochs):
-            idxs = np.arange(self.traj_size)
+            idxs = np.arange(traj_len)
             # if epoch < self.inference_opt_epochs - 1:
             #     np.random.shuffle(idxs)
             # TODO shuffle the input for a better training outcome? Is this correct?!
@@ -133,18 +170,18 @@ class Sampler(object):
             inference_log_likelihoods.append(inference_log_likelihood)
 
             inference_params = self.model.inference_model.embedding_params(traj_windows[idxs])
-            inference_means += list(inference_params[0])
-            inference_stds += list(inference_params[1])
+            inference_means = inference_params[0]
+            inference_stds = inference_params[1]
 
         # discount/bootstrap off value fn
         # mb_returns = np.zeros_like(mb_rewards)
         mb_advs = np.zeros_like(mb_rewards)
         lastgaelam = 0
 
-        mb_rewards += self.inference_coef * inference_discounted_log_likelihoods.reshape(mb_rewards.shape)  # TODO use discounted LL?
+        mb_rewards += self.inference_coef * inference_discounted_log_likelihoods.reshape(mb_rewards.shape)
 
-        for t in reversed(range(self.traj_size)):
-            if t == self.traj_size - 1:
+        for t in reversed(range(traj_len)):
+            if t == traj_len - 1:
                 nextnonterminal = 1.0 - self.dones
                 nextvalues = last_values
             else:
@@ -161,6 +198,14 @@ class Sampler(object):
 
         mb_returns = mb_advs + mb_values
 
-        return (*map(sf01, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs)), mb_latents,
-                mb_tasks, mb_states, epinfos, completions, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods,
-                inference_means, inference_stds)
+        inference_means = np.array(inference_means)
+        inference_stds = np.array(inference_stds)
+
+        if render:
+            return mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, mb_latents, \
+                   mb_tasks, mb_states, epinfos, completions, inference_loss, inference_log_likelihoods, \
+                   inference_discounted_log_likelihoods, inference_means, inference_stds, video
+
+        return mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, mb_latents, \
+               mb_tasks, mb_states, epinfos, completions, inference_loss, inference_log_likelihoods, \
+               inference_discounted_log_likelihoods, inference_means, inference_stds

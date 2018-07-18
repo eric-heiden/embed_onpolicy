@@ -7,7 +7,10 @@ import numpy as np
 import os.path as osp
 import tensorflow as tf
 
+from curriculum import ReverseCurriculum, BasicCurriculum
+
 sys.path.insert(0, osp.join(osp.dirname(__file__), 'baselines'))
+sys.path.insert(0, osp.join(osp.dirname(__file__), 'garage'))
 
 from baselines import logger
 from baselines.common import set_global_seeds
@@ -16,7 +19,6 @@ from baselines.common.vec_env.dummy_vec_env import DummyVecEnv
 from point3d_env import Point3dEnv, TASKS
 from policies import MlpEmbedPolicy
 import ppo2embed
-
 
 SEED = 12345
 
@@ -31,10 +33,11 @@ def train(num_timesteps, seed, log_folder):
                             inter_op_parallelism_threads=ncpu)
     tf.Session(config=config).__enter__()
 
-    task_space = gym.spaces.Box(low=0, high=1, shape=(len(TASKS),))
-    latent_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(3,))
+    task_space = gym.spaces.Box(low=0, high=1, shape=(len(TASKS),), dtype=np.float32)
+    latent_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float32)
 
-    env = DummyVecEnv([lambda: Point3dEnv()])
+    env_fn = lambda task: DummyVecEnv([lambda: Point3dEnv(task=task)])
+
     # env = VecNormalize(env, ob=True, ret=False, cliprew=200)
 
     def plot_traj(fig, where, task, batch_tuple_size, batches, colormap):
@@ -60,17 +63,18 @@ def train(num_timesteps, seed, log_folder):
         ax.scatter([TASKS[task][0]], [TASKS[task][1]], s=16, c='orange', zs=-5, zdir='z', zorder=1)
 
         for i, batch in enumerate(batches):
-            bs = tuple([np.array([batch[i][k] for i in range(len(batch))]) for k in range(batch_tuple_size)])
+            # bs = tuple([np.array([batch[i][k] for i in range(len(batch))]) for k in range(batch_tuple_size)])
             obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos, \
-                inference_means, inference_stds = bs
+            inference_means, inference_stds = tuple(batch)
+            pos = [epinfo["episode"]["position"] for epinfo in epinfos]
             # ax.plot([0] + obs[:, 0], [0] + obs[:, 1], [0] + obs[:, 2], color=colormap(i * 1. / len(batches)),
             #              zorder=2, linewidth=.5, marker='o', markersize=0.5, alpha=0.1)
-            ax.plot([0] + obs[:, 1], [0] + obs[:, 2], color=colormap(i * 1. / len(batches)),
-                         zorder=2, linewidth=.5, zs=-5, zdir='x')
-            ax.plot([0] + obs[:, 0], [0] + obs[:, 2], color=colormap(i * 1. / len(batches)),
-                         zorder=2, linewidth=.5, zs=5, zdir='y')
-            ax.plot([0] + obs[:, 0], [0] + obs[:, 1], color=colormap(i * 1. / len(batches)),
-                         zorder=2, linewidth=.5, zs=-5, zdir='z')
+            ax.plot([0] + pos[:, 1], [0] + pos[:, 2], color=colormap(i * 1. / len(batches)),
+                    zorder=2, linewidth=.5, zs=-5, zdir='x')
+            ax.plot([0] + pos[:, 0], [0] + pos[:, 2], color=colormap(i * 1. / len(batches)),
+                    zorder=2, linewidth=.5, zs=5, zdir='y')
+            ax.plot([0] + pos[:, 0], [0] + pos[:, 1], color=colormap(i * 1. / len(batches)),
+                    zorder=2, linewidth=.5, zs=-5, zdir='z')
 
         ax.set_xlim([-4, 4])
         ax.set_ylim([-4, 4])
@@ -78,33 +82,32 @@ def train(num_timesteps, seed, log_folder):
 
     set_global_seeds(seed)
     policy = lambda *args, **kwargs: MlpEmbedPolicy(*args, **kwargs, use_beta=USE_BETA)
-    model = ppo2embed.learn(policy=policy,
-                            env=env,
-                            task_space=task_space,
-                            latent_space=latent_space,
-                            traj_size=40,
-                            nbatches=4,
-                            lam=0.95,
-                            gamma=0.99,
-                            inference_opt_epochs=5,
-                            log_interval=1,
-                            policy_entropy=0.1,
-                            embedding_entropy=0.01,
-                            inference_coef=.001,
-                            inference_horizon=3,
-                            em_hidden_layers=(16,),
-                            pi_hidden_layers=(32, 32),
-                            vf_hidden_layers=(32, 32),
-                            inference_hidden_layers=(16,),
-                            lr=5e-3,
-                            cliprange=0.2,
-                            seed=seed,
-                            total_timesteps=num_timesteps,
-                            plot_folder=osp.join(log_folder, "plots"),
-                            traj_plot_fn=plot_traj,
-                            log_folder=log_folder)
-
-    return model, env
+    ppo2embed.learn(policy=policy,
+                    env_fn=env_fn,
+                    task_space=task_space,
+                    latent_space=latent_space,
+                    traj_size=40,
+                    nbatches=4,
+                    lam=0.95,
+                    gamma=0.99,
+                    inference_opt_epochs=5,
+                    log_interval=1,
+                    policy_entropy=0.1,
+                    embedding_entropy=-0.1,  # TODO was 0.01 (need to regulate it!)
+                    inference_coef=.001,
+                    inference_horizon=3,
+                    em_hidden_layers=(16,),
+                    pi_hidden_layers=(32, 32),
+                    vf_hidden_layers=(32, 32),
+                    inference_hidden_layers=(16,),
+                    lr=5e-3,
+                    cliprange=0.2,
+                    seed=seed,
+                    total_timesteps=num_timesteps,
+                    plot_folder=osp.join(log_folder, "plots"),
+                    traj_plot_fn=plot_traj,
+                    log_folder=log_folder,
+                    curriculum_fn=ReverseCurriculum)
 
 
 def main():

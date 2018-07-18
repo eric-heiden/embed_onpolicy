@@ -7,10 +7,9 @@ from policies import MlpEmbedPolicy
 
 
 class Model(object):
-    def __init__(self, *, policy, ob_space, ac_space, task_space, latent_space, traj_size,
-                 policy_entropy, vf_coef, max_grad_norm, embedding_entropy=0., inference_horizon=5, seed=None,
-                 em_hidden_layers=(8,), pi_hidden_layers=(16, 16), vf_hidden_layers=(16, 16),
-                 inference_hidden_layers=(16,), **_kwargs):
+    def __init__(self, *, policy, ob_space, ac_space, task_space, latent_space, traj_size, policy_entropy, vf_coef,
+                 max_grad_norm, embedding_entropy=0., inference_horizon=5, seed=None, em_hidden_layers=(8,),
+                 pi_hidden_layers=(16, 16), vf_hidden_layers=(16, 16), inference_hidden_layers=(16,), **_kwargs):
 
         self.traj_size = traj_size
         self.policy_entropy = policy_entropy
@@ -125,9 +124,11 @@ class Model(object):
 
                 result = sess.run(
                     [pg_loss, vf_loss, approxkl, clipfrac, entropy, train_model.embedding_entropy, final_loss,
-                     train_model.Embedding, src_grads],
+                     train_model.tiled_em, src_grads],
                     td_map
                 )
+
+                # print("Observation len: ", result[-3], " true:", np.shape(obs))
 
                 losses.append(result[:len(self.loss_names)])
                 computed_latents.append(result[-2])

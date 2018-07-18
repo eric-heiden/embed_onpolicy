@@ -1,11 +1,21 @@
+import itertools
 import os
 import sys
 import time
+from functools import partial
+from itertools import repeat
+
+import dill
+import cloudpickle
+from pathos import pools
+
+import imageio
 import numpy as np
 import os.path as osp
 import tensorflow as tf
 from collections import deque
 
+from curriculum import BasicCurriculum, ReverseCurriculum
 from model import Model
 from sampler import Sampler
 from visualizer import Visualizer
@@ -28,12 +38,14 @@ def safemean(xs):
     return np.nan if len(xs) == 0 else np.mean(xs)
 
 
-def learn(*, policy, env, task_space, latent_space, traj_size,
+def learn(*, policy, env_fn, task_space, latent_space, traj_size,
                                nbatches, total_timesteps,
           policy_entropy, embedding_entropy, inference_coef, inference_horizon, lr,
           vf_coef=0.5, max_grad_norm=0.5, gamma=0.99, lam=0.95,
           log_interval=10, inference_opt_epochs=4, cliprange=0.2, seed=None,
-          save_interval=0, load_path=None, plot_interval=50, plot_folder=None, traj_plot_fn=None, log_folder=None,
+          save_interval=500, load_path=None, plot_interval=50, plot_event_interval=200,
+          plot_folder=None, traj_plot_fn=None, log_folder=None,
+          render_interval=-1, render_fn=None, curriculum_fn=BasicCurriculum,
           **kwargs):
     if isinstance(lr, float):
         lr = constfn(lr)
@@ -49,9 +61,12 @@ def learn(*, policy, env, task_space, latent_space, traj_size,
 
     total_timesteps = int(total_timesteps)
 
+    env = env_fn(task=0)  # instantiate and environment ust to get the spaces
     nenvs = env.num_envs
     ob_space = env.observation_space
     ac_space = env.action_space
+
+    ntasks = task_space.shape[0]
 
     make_model = lambda: Model(policy=policy, ob_space=ob_space, ac_space=ac_space,
                                task_space=task_space, latent_space=latent_space,
@@ -73,9 +88,12 @@ def learn(*, policy, env, task_space, latent_space, traj_size,
     sampler = Sampler(env=env, model=model, traj_size=traj_size, inference_opt_epochs=inference_opt_epochs,
                       inference_coef=inference_coef, gamma=gamma, lam=lam)
 
+    curriculum = curriculum_fn(env_fn, batches=nbatches, tasks=ntasks)
+
     visualizer = Visualizer(model, env, plot_folder, traj_plot_fn)
 
-    ntasks = task_space.shape[0]
+    if render_fn is not None and render_interval > 0:
+        env.render()
 
     epinfobuf = deque(maxlen=100)
     tfirststart = time.time()
@@ -88,6 +106,8 @@ def learn(*, policy, env, task_space, latent_space, traj_size,
         logger.logkv(key, value)
         summary_writer.add_summary(tf.Summary(value=[tf.Summary.Value(tag=key,
                                                                       simple_value=value)]), update)
+
+    pool = pools.ProcessPool(8)
 
     nupdates = total_timesteps // traj_size
     for update in range(1, nupdates + 1):
@@ -104,27 +124,41 @@ def learn(*, policy, env, task_space, latent_space, traj_size,
         training_batches = []
         visualization_batches = []
         act_latents = []
-        for i_batch in range(nbatches):
-            for task in range(ntasks):
-                obs, returns, masks, actions, values, neglogpacs, latents, tasks, states, epinfos, \
-                    completions, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods, \
-                    inference_means, inference_stds = sampler.run(task)
+        video = []
+
+        for task, envs in enumerate(curriculum.strategy):
+            for i_batch, env in enumerate(envs):
+                if render_fn is not None and render_interval > 0 and (update == 1 or update % render_interval == 0) and i_batch == 0:
+                    rf = render_fn(task, update)
+                    obs, returns, masks, actions, values, neglogpacs, latents, tasks, states, epinfos, \
+                        completions, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods, \
+                        inference_means, inference_stds, sampled_video = sampler.run(env, task, render=rf)
+                    video += sampled_video
+                else:
+                    obs, returns, masks, actions, values, neglogpacs, latents, tasks, states, epinfos, \
+                        completions, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods, \
+                        inference_means, inference_stds = sampler.run(env, task)
                 epinfobuf.extend(epinfos)
                 training_batches.append((obs, tasks, returns, masks, actions, values, neglogpacs, states))
                 visualization_batches.append((obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos,
                                               inference_means, inference_stds))
-                neglogpacs_total .append(neglogpacs)
+                neglogpacs_total.append(neglogpacs)
                 act_latents.append(latents)
                 inference_losses.append(inference_loss)
                 sampled_tasks.append(tasks)
                 completion_ratios[task] += completions
         completion_ratios /= 1. * nbatches
 
+        if len(video) > 0 and plot_folder is not None:
+            imageio.mimsave(osp.join(plot_folder, 'embed_%05d.mp4' % update), video, fps=20)
+
         train_return = model.train(lrnow, cliprangenow, training_batches)
         train_latents = train_return[-2]
         advantages = train_return[-1]
-        latent_distances = np.abs(np.array(act_latents) - np.array(train_latents))
+        latent_distances = [np.mean(np.abs(np.array(al) - np.array(tl))) for al, tl in zip(act_latents, train_latents)]
         mblossvals = train_return[:-2]
+
+        curriculum.update(visualization_batches)
 
         # if states is None:  # nonrecurrent version
         #     inds = np.arange(traj_size)
@@ -170,11 +204,12 @@ def learn(*, policy, env, task_space, latent_space, traj_size,
         tnow = time.time()
         fps = int(traj_size / (tnow - tstart))
         if plot_interval and (update % plot_interval == 0 or update == 1):
-            image = visualizer.visualize(update, visualization_batches)
+            image = visualizer.visualize(update, visualization_batches, curriculum)
             if update == 1:
                 vis_placeholder = tf.placeholder(tf.uint8, image.shape)
                 vis_summary = tf.summary.image('episode_microscope', vis_placeholder)
-            summary_writer.add_summary(vis_summary.eval(feed_dict={vis_placeholder: image}), update)
+            if update % plot_event_interval == 0 or update == 1:
+                summary_writer.add_summary(vis_summary.eval(feed_dict={vis_placeholder: image}), update)
         if update % log_interval == 0 or update == 1:
             with tf.name_scope('summaries'):
                 # ev = explained_variance(values, returns)
@@ -183,21 +218,25 @@ def learn(*, policy, env, task_space, latent_space, traj_size,
                 # logger.logkv("total_timesteps", update * nbatch)
                 log("fps", fps, update)
                 for t in range(ntasks):
-                    log("completion_ratio/task%i" % t, safemean(completion_ratios[t::ntasks]), update)
+                    log("completion_ratio/task_%i" % t, safemean(completion_ratios[t::ntasks]), update)
+                if isinstance(curriculum, ReverseCurriculum):
+                    for t in range(ntasks):
+                        log("curriculum_progress/task_%i" % t, curriculum.task_progress_ratios[t], update)
                 log("latent_sample_error", latent_distances, update)
                 log("episode/reward", safemean([epinfo['r'] for epinfo in epinfobuf]), update)
                 log("episode/length", safemean([epinfo['l'] for epinfo in epinfobuf]), update)
-                for t in range(task_space.shape[0]):
-                    log("sampled_task/%i" % t, np.sum(sampled_tasks[:, t]), update)
+                # for t in range(task_space.shape[0]):
+                #     log("sampled_task/%i" % t, np.sum(sampled_tasks[:, t]), update)
                 log('time_elapsed', tnow - tfirststart, update)
+                log('iteration', update, update)
                 for (lossval, lossname) in zip(lossvals, model.loss_names):
                     log("loss/%s" % lossname, lossval, update)
                 log("loss/inference_net", safemean(inference_losses), update)
 
-                log("ppo_internals/neglogpac", safemean(neglogpacs_total), update)
-                log("ppo_internals/returns", safemean([b[2] for b in training_batches]), update)
-                log("ppo_internals/values", safemean([b[5] for b in training_batches]), update)
-                log("ppo_internals/advantages", safemean(advantages), update)
+                # log("ppo_internals/neglogpac", safemean(neglogpacs_total), update)
+                # log("ppo_internals/returns", safemean([b[2] for b in training_batches]), update)
+                # log("ppo_internals/values", safemean([b[5] for b in training_batches]), update)
+                # log("ppo_internals/advantages", safemean(advantages), update)
 
                 logger.dumpkvs()
                 summary_writer.flush()
