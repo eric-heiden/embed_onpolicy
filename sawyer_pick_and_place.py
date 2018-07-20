@@ -1,23 +1,20 @@
 from garage.envs.base import Step
 from garage.misc.overrides import overrides
-from garage.envs.mujoco.sawyer.reacher_env import ReacherEnv
+from garage.envs.mujoco.sawyer.pick_and_place_env import PickAndPlaceEnv
 
 from dm_control.utils import rewards
 
 import gym
 from gym.spaces import Box
-from gym.envs.robotics.utils import mocap_set_action, reset_mocap2body_xpos
+from gym.envs.robotics.utils import ctrl_set_action, mocap_set_action, reset_mocap2body_xpos
 
 import numpy as np
 
-
-TASKS = [
-    # (0.6, 0., 0.60),
-    (0.3, -0.3, 0.30), (0.3, 0.3, 0.30),
-    (0.6, 0.0, 0.8)]
+TASKS = [(0.6, -0.3, 0.003, True), (0.6, 0, 0.003, True), (0.6, 0.3, 0.003, True),
+         (0.6, -0.3, 0.15, False), (0.6, 0, 0.15, False), (0.6, 0.3, 0.15, False)]
 
 
-class TaskReacherEnv(ReacherEnv):
+class TaskPickAndPlaceEnv(PickAndPlaceEnv):
     def __init__(self, task=0, control_method="position_control", *args, **kwargs):
         self._task = task
         self.onehot = np.zeros(len(TASKS))
@@ -28,23 +25,25 @@ class TaskReacherEnv(ReacherEnv):
         self._distance_threshold = 0.03
         reset_mocap2body_xpos(self.sim)
 
+        self.env_setup(self._initial_qpos)
+
         self.init_qpos = self.sim.data.qpos
         self.init_qvel = self.sim.data.qvel
         self.init_qacc = self.sim.data.qacc
         self.init_ctrl = self.sim.data.ctrl
 
-        self._goal = np.array(TASKS[task])
+        self._goal = np.array(TASKS[task][:3])
         self.set_position(self._start_pos)
-        print("Instantiating TaskReacherEnv (task = %i, control_mode = %s)" % (self._task, self._control_method))
+        print("Instantiating TaskPickAndPlaceEnv (task = %i, control_mode = %s)" % (self._task, self._control_method))
 
     @overrides
     @property
     def action_space(self):
         if self._control_method == 'torque_control':
-            return super(TaskReacherEnv, self).action_space
+            return super(TaskPickAndPlaceEnv, self).action_space
         elif self._control_method == 'position_control':
             # specify lower action limits
-            return Box(-0.03, 0.03, shape=(3,), dtype=np.float32)
+            return Box(-0.03, 0.03, shape=(4,), dtype=np.float32)
         else:
             raise NotImplementedError()
 
@@ -74,7 +73,7 @@ class TaskReacherEnv(ReacherEnv):
             self.sim.forward()
         else:
             reset_mocap2body_xpos(self.sim)
-            self.sim.data.mocap_pos[:] = self.sim.data.mocap_pos + action
+            self.sim.data.mocap_pos[:] = self.sim.data.mocap_pos + action[:3]
             for _ in range(50):
                 self.sim.step()
             self._step += 1
@@ -116,7 +115,7 @@ class TaskReacherEnv(ReacherEnv):
     @overrides
     def reset(self, init_state=None):
         self._step = 0
-        super(TaskReacherEnv, self).reset(init_state)[:3]
+        super(TaskPickAndPlaceEnv, self).reset(init_state)[:3]
         self.set_position(self._start_pos)
         self.select_task(self._task)
         return self.get_obs()
@@ -134,20 +133,34 @@ class TaskReacherEnv(ReacherEnv):
         return self.sim.data.get_site_xpos('grip')
 
     def set_position(self, pos):
-        self.sim.data.set_mocap_pos('mocap', pos)
+        # self.sim.data.set_mocap_pos('mocap', pos[:3])
+        # self.sim.data.set_site_pos('object0', pos)
 
-        self.sim.step()
-        for _ in range(200):
+        # self.sim.step()
+        # for _ in range(200):
+        #     self.sim.step()
+
+        reset_mocap2body_xpos(self.sim)
+        self.sim.data.mocap_quat[:] = np.array([0, 1, 0, 0])
+        # gripper_ctrl = -50 if gripper_ctrl < 0 else 10
+        gripper_ctrl = np.array([0, 0])
+        # action = np.concatenate([pos, rot_ctrl, gripper_ctrl])
+        # ctrl_set_action(self.sim, action)  # For gripper
+        # mocap_set_action(self.sim, action)
+        # reset_mocap2body_xpos(self.sim)
+        self.sim.data.set_mocap_pos('mocap', pos)
+        for _ in range(2000):
             self.sim.step()
 
-        # grip_pos = self.sim.data.get_site_xpos('grip')
-        # reset_mocap2body_xpos(self.sim)
-        # self.sim.data.set_mocap_pos('mocap', pos)
+            reset_mocap2body_xpos(self.sim)
+            self.sim.data.mocap_quat[:] = np.array([0, 1, 0, 0])
+            self.sim.data.set_mocap_pos('mocap', pos)
+            # self.sim.forward()
         # # self.sim.data.mocap_pos[:] = pos
         # reset_mocap2body_xpos(self.sim)
         # print("Set position to", pos)
         # print("SawyerReach Servo Error:", np.linalg.norm(pos-grip_pos))
-        # self.sim.forward()
+        self.sim.forward()
 
     @property
     def start_position(self):
@@ -160,18 +173,62 @@ class TaskReacherEnv(ReacherEnv):
         self._task = (self._task + 1) % len(TASKS)
         self.onehot = np.zeros(len(TASKS))
         self.onehot[self._task] = 1
-        self._goal = np.array(TASKS[self._task], dtype=np.float32)
-        site_id = self.sim.model.site_name2id('target_pos')
-        self.sim.model.site_pos[site_id] = self._goal
+        self._goal = np.array(TASKS[self._task][:3], dtype=np.float32)
+        # site_id = self.sim.model.site_name2id('target_pos')
+        # self.sim.model.site_pos[site_id] = self._goal
         self.sim.forward()
         return self._task
+
+    def set_gripper_state(self, state):
+        state = np.clip(state, 0., 1.)
+        # self.sim.data.set_joint_qpos('r_gripper_l_finger_joint', state * 0.020833)
+        # self.sim.data.set_joint_qpos('r_gripper_r_finger_joint', -state * 0.020833)
+
+        self.sim.data.ctrl[:] = np.array([state * 0.020833, -state * 0.020833])
+        for _ in range(self.frame_skip):
+            self.sim.step()
+        # self.sim.forward()
+        new_com = self.sim.data.subtree_com[0]
+        self.dcom = new_com - self.current_com
+        self.current_com = new_com
+        # self.sim
 
     def select_task(self, task: int):
         self._task = task
         self.onehot = np.zeros(len(TASKS))
         self.onehot[self._task] = 1
-        self._goal = np.array(TASKS[self._task], dtype=np.float32)
-        site_id = self.sim.model.site_name2id('target_pos')
-        self.sim.model.site_pos[site_id] = self._goal
+        self._goal = np.array(TASKS[self._task][:3], dtype=np.float32)
+
+        if TASKS[self._task][3]:
+            # pick
+            # object_qpos = self.sim.data.get_joint_qpos('object0:joint')
+            object_qpos = np.concatenate((TASKS[self._task][:3], [1, 0, 0, 0]))
+            self.sim.data.set_joint_qpos('object0:joint', object_qpos)
+            r = np.random.randn(3) * 0.2
+            # print(r)
+            self.set_position(self._start_pos)  # + np.random.randn(3) * 0.2)
+            self.set_gripper_state(0)  # closed
+        else:
+            # place
+            pos = np.array(self._start_pos[:3])  # + np.random.randn(3) * 0.2
+            self._goal = np.array(pos, dtype=np.float32)
+            self.set_position(self._goal)
+            self.set_gripper_state(1)  # open
+            for _ in range(20):
+                self.sim.step()
+            # place object
+            offset = np.array([0, 0, -.1])
+            object_qpos = np.concatenate((pos + offset, [1, 0, 0, 0]))
+            self.sim.data.set_joint_qpos('object0:joint', object_qpos)
+            for _ in range(20):
+                self.sim.step()
+            self.set_gripper_state(0)  # closed
+
+        for _ in range(20):
+            self.sim.step()
+            # self.sim.forward()
+
+        # site_id = self.sim.model.site_name2id('target_pos')
+        # self.sim.model.site_pos[site_id] = self._goal
         self.sim.forward()
         return self._task

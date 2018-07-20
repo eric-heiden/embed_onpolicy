@@ -19,7 +19,7 @@ from baselines import logger
 from baselines.common import set_global_seeds
 from baselines.common.vec_env.dummy_vec_env import DummyVecEnv
 
-from sawyer_reach import TaskReacherEnv, TASKS
+from sawyer_pick_and_place import TaskPickAndPlaceEnv, TASKS
 
 from policies import MlpEmbedPolicy
 import ppo2embed
@@ -41,7 +41,7 @@ def train(num_timesteps, seed, log_folder):
     task_space = gym.spaces.Box(low=0, high=1, shape=(len(TASKS),), dtype=np.float32)
     latent_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32)
 
-    env_fn = lambda task: DummyVecEnv([lambda: TaskReacherEnv(task=task, control_method="position_control")])
+    env_fn = lambda task: DummyVecEnv([lambda: TaskPickAndPlaceEnv(task=task, control_method="position_control")])
     env_ = env_fn(task=0)
     print("Start position:", env_.envs[0].start_position)
 
@@ -99,7 +99,7 @@ def train(num_timesteps, seed, log_folder):
         lower_part = 512 // 5
         max_reward = 1.
 
-        def render(env: TaskReacherEnv, obs, actions, values, rewards, infos):
+        def render(env: TaskPickAndPlaceEnv, obs, actions, values, rewards, infos):
             # assert(env.envs[0]._task == task)
             # print("TASK %i == %i   %s" % (env.envs[0]._task, task, str(env.envs[0]._goal)))
             env.render_camera = "camera_side"
@@ -187,19 +187,19 @@ def main():
     # logger.configure(dir=log_folder, format_strs=['stdout', 'log', 'csv'])
     # train(num_timesteps=1e6, seed=SEED, log_folder=log_folder)
 
-    env = TaskReacherEnv(control_method="position_control")
+    env = TaskPickAndPlaceEnv(control_method="position_control")
     video = []
     font = ImageFont.truetype("Consolas.ttf", 32)
     for t in tqdm(range(len(TASKS))):
         env.select_task(t)
         pos = env.reset()
         print(TASKS[t])
-        env.set_position(TASKS[t])
+        # env.set_position(TASKS[t])
         env.render()
         action = (0., 0., 0.1)
-        for i in range(150):
-            env.step(np.zeros(env.action_space.shape))
-            # env.step(env.action_space.sample())
+        for i in range(15):
+            # env.step(np.zeros(3))
+            env.step(env.action_space.sample())
             env.render_camera = "camera_side"
             # env.render()
             img_left = env.render(mode='rgb_array')
