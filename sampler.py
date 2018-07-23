@@ -1,3 +1,5 @@
+from typing import Callable
+
 import numpy as np
 
 from collections import deque
@@ -17,9 +19,10 @@ def sf01(arr):
 
 class Sampler(object):
 
-    def __init__(self, *, env: DummyVecEnv, model: Model, gamma, lam, traj_size: int = 20,
+    def __init__(self, *, env: DummyVecEnv, unwrap_env: Callable, model: Model, gamma, lam, traj_size: int = 20,
                  inference_opt_epochs: int = 4, inference_coef: float = 0.1):
         self.env = env
+        self.unwrap_env = unwrap_env
         self.model = model
         nenv = env.num_envs
         assert (nenv == 1)  # ensure to sample from embedding the same number of steps, in training and acting
@@ -50,8 +53,8 @@ class Sampler(object):
             latents.append(self.model.get_latent(task))
 
         # TODO scrap DummyVecEnv
-        assert len(env.envs) == 1
-        env = env.envs[0]
+        # assert len(env.envs) == 1
+        unenv = self.unwrap_env(env)
 
         # for _env in env.envs:
         #     # env.select_task(task)
@@ -92,6 +95,10 @@ class Sampler(object):
             mb_dones.append(self.dones)
 
             self.obs[:], rewards, self.dones, infos = env.step(actions)
+            self.obs[:] = self.obs[0]
+            rewards = rewards[0]
+            self.dones = self.dones[0]
+            infos = infos[0]
 
             if render:
                 c_obs.append(self.obs.copy())
@@ -101,7 +108,7 @@ class Sampler(object):
                 c_infos.append(infos)
 
             if render:
-                video.append(render(env, c_obs, c_actions, c_values, c_rewards, c_infos))
+                video.append(render(unenv, c_obs, c_actions, c_values, c_rewards, c_infos))
 
             mb_obs.append(self.obs[0].copy())
             mb_rewards.append(rewards)

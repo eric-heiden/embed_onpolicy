@@ -68,7 +68,8 @@ class MlpPolicy(object):
 class MlpEmbedPolicy(object):
     def __init__(self, sess: tf.Session, ob_space: Box, ac_space: Box, task_space: Box, latent_space: Box,
                  traj_size, reuse=False, name="model", use_beta=False, seed=None,
-                 em_hidden_layers=(8,), pi_hidden_layers=(16, 16), vf_hidden_layers=(16, 16)):
+                 em_hidden_layers=(8,), pi_hidden_layers=(16, 16), vf_hidden_layers=(16, 16),
+                 activation_fn=tf.nn.leaky_relu):
 
         with tf.variable_scope(name, reuse=reuse):
             # task input
@@ -109,7 +110,7 @@ class MlpEmbedPolicy(object):
             pi_input = em_ob
             with tf.name_scope("pi"):
                 for i, units in enumerate(pi_hidden_layers):
-                    pi_h = tf.tanh(fc(pi_input, 'pi_fc%i' % (i+1), nh=units, init_scale=np.sqrt(2)), name="pi_h%i" % (i+1))
+                    pi_h = activation_fn(fc(pi_input, 'pi_fc%i' % (i+1), nh=units, init_scale=np.sqrt(2)), name="pi_h%i" % (i+1))
                     pi_input = pi_h
 
             # value function
@@ -118,7 +119,7 @@ class MlpEmbedPolicy(object):
                 vf_input = tf.concat((processed_ob, tiled_t), axis=1, name="ob_task")
                 # vf_input = tf.concat((Embedding, processed_ob, tiled_t), axis=1, name="em_ob_task")
                 for i, units in enumerate(vf_hidden_layers):
-                    vf_h = tf.tanh(fc(vf_input, 'vf_fc%i' % (i+1), nh=units, init_scale=np.sqrt(2)), name="vf_h%i" % (i+1))
+                    vf_h = activation_fn(fc(vf_input, 'vf_fc%i' % (i+1), nh=units, init_scale=np.sqrt(2)), name="vf_h%i" % (i+1))
                     vf_input = vf_h
                 vf = fc(vf_input, 'vf', 1)[:, 0]
 

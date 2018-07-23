@@ -21,9 +21,10 @@ import os.path as osp
 
 
 class Visualizer(object):
-    def __init__(self, model: Model, env: DummyVecEnv, plot_folder: str, traj_plot_fn: Callable[..., None]):
+    def __init__(self, model: Model, env: DummyVecEnv, unwrap_env: Callable, plot_folder: str, traj_plot_fn: Callable):
         self.model = model
         self.env = env
+        self.unwrap_env = unwrap_env
         self.plot_folder = plot_folder
         self.traj_plot_fn = traj_plot_fn
 
@@ -61,7 +62,7 @@ class Visualizer(object):
         additional_width = 0
         if curriculum is not None:
             additional_width = 5
-        fig = plt.figure(figsize=(latent_dim * 6 + 4 + nactions * 4 + additional_width, ntasks * 3))
+        fig = plt.figure(figsize=(latent_dim * 6 + 8 + nactions * 4 + additional_width, ntasks * 3))
         fig.suptitle(title)
 
         gs0 = gridspec.GridSpec(ntasks, 1)
@@ -70,6 +71,7 @@ class Visualizer(object):
         action_axes = []
         value_axes = []
         infer_axes = []
+        obs_axes = []
 
         embedding_means, embedding_stds = [], []
         latent_mins = np.zeros(latent_dim)
@@ -94,7 +96,7 @@ class Visualizer(object):
                 curriculum_plots = 1
 
             # plot trajectories
-            gs00 = gridspec.GridSpecFromSubplotSpec(1, 2 + latent_dim * 2 + nactions + curriculum_plots, subplot_spec=gs0[task])
+            gs00 = gridspec.GridSpecFromSubplotSpec(1, 3 + latent_dim * 2 + nactions + curriculum_plots, subplot_spec=gs0[task])
 
             if self.traj_plot_fn is not None:
                 self.traj_plot_fn(fig, gs00[plot_index], task, batch_tuple_size, task_data[task], colormap)
@@ -107,9 +109,9 @@ class Visualizer(object):
                 action_ax = plt.Subplot(fig, gs00[plot_index])
                 action_ax.set_title("action[%i]" % da)
                 action_ax.grid()
-                if da > 0 or task > 0:
-                    action_ax.get_shared_x_axes().join(action_ax, action_axes[0])
-                    action_ax.get_shared_y_axes().join(action_ax, action_axes[0])
+                if task > 0:
+                    action_ax.get_shared_x_axes().join(action_ax, action_axes[da])
+                    action_ax.get_shared_y_axes().join(action_ax, action_axes[da])
 
                 action_ax.axhline(self.env.action_space.low[da], zorder=2, linewidth=2, color="r")
                 action_ax.axhline(self.env.action_space.high[da], zorder=2, linewidth=2, color="r")
@@ -123,6 +125,31 @@ class Visualizer(object):
                 action_axes.append(action_ax)
                 fig.add_subplot(action_ax)
                 plot_index += 1
+
+            # plot observations
+            obs_ax = plt.Subplot(fig, gs00[plot_index])
+            obs_ax.set_title("observations")
+            obs_ax.grid()
+            if task > 0:
+                obs_ax.get_shared_x_axes().join(obs_ax, obs_axes[0])
+                obs_ax.get_shared_y_axes().join(obs_ax, obs_axes[0])
+
+            obs_dim = self.env.observation_space.shape[0]
+            for do in range(obs_dim):
+                for i, batch in enumerate(task_data[task]):
+                    # bs = tuple([np.array([batch[i][k] for i in range(len(batch))]) for k in range(batch_tuple_size)])
+                    obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos, \
+                        inference_means, inference_stds = tuple(batch)
+                    if i == 0:
+                        obs_ax.plot(obs[:, do], '.-', zorder=2, color=colormap(do * 1. / obs_dim), label="obs[%i]" % do)
+                    else:
+                        obs_ax.plot(obs[:, do], '.-', zorder=2, color=colormap(do * 1. / obs_dim))
+
+            if task == 0:
+                obs_ax.legend()
+            obs_axes.append(obs_ax)
+            fig.add_subplot(obs_ax)
+            plot_index += 1
 
             # plot values / returns
             value_ax = plt.Subplot(fig, gs00[plot_index])
@@ -224,6 +251,8 @@ class Visualizer(object):
                     # bs = tuple([np.array([batch[i][k] for i in range(len(batch))]) for k in range(batch_tuple_size)])
                     obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos, \
                         inference_means, inference_stds = tuple(batch)
+                    if len(inference_means.shape) < 2:
+                        break
                     mus = inference_means[:, li]
                     sigmas = inference_stds[:, li]
                     xs = np.arange(0, len(obs))
@@ -243,7 +272,6 @@ class Visualizer(object):
 
         fig.tight_layout(rect=[0, 0.03, 1, 0.95])
         fig.savefig(osp.join(self.plot_folder, 'embed_%05d.png' % update))
-        plot_index += latent_dim
 
         expand = True
         fig.canvas.draw()

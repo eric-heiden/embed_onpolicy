@@ -38,7 +38,7 @@ def safemean(xs):
     return np.nan if len(xs) == 0 else np.mean(xs)
 
 
-def learn(*, policy, env_fn, task_space, latent_space, traj_size,
+def learn(*, policy, env_fn, unwrap_env, task_space, latent_space, traj_size,
                                nbatches, total_timesteps,
           policy_entropy, embedding_entropy, inference_coef, inference_horizon, lr,
           vf_coef=0.5, max_grad_norm=0.5, gamma=0.99, lam=0.95,
@@ -62,7 +62,7 @@ def learn(*, policy, env_fn, task_space, latent_space, traj_size,
     total_timesteps = int(total_timesteps)
 
     env = env_fn(task=0)  # instantiate and environment ust to get the spaces
-    nenvs = env.num_envs
+    nenvs = 1  # env.num_envs
     ob_space = env.observation_space
     ac_space = env.action_space
 
@@ -85,12 +85,12 @@ def learn(*, policy, env_fn, task_space, latent_space, traj_size,
     if load_path is not None:
         model.load(load_path)
 
-    sampler = Sampler(env=env, model=model, traj_size=traj_size, inference_opt_epochs=inference_opt_epochs,
+    sampler = Sampler(env=env, unwrap_env=unwrap_env, model=model, traj_size=traj_size, inference_opt_epochs=inference_opt_epochs,
                       inference_coef=inference_coef, gamma=gamma, lam=lam)
 
-    curriculum = curriculum_fn(env_fn, batches=nbatches, tasks=ntasks)
+    curriculum = curriculum_fn(env_fn, unwrap_env=unwrap_env, batches=nbatches, tasks=ntasks)
 
-    visualizer = Visualizer(model, env, plot_folder, traj_plot_fn)
+    visualizer = Visualizer(model, env, unwrap_env, plot_folder, traj_plot_fn)
 
     if render_fn is not None and render_interval > 0:
         env.render()
