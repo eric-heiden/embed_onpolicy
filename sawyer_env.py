@@ -8,6 +8,26 @@ import numpy as np
 from garage.envs.mujoco import MujocoEnv
 from garage.misc.overrides import overrides
 
+from collections import namedtuple
+from typing import Callable
+import numpy as np
+
+import gym
+
+Configuration = namedtuple("Configuration", ["gripper_pos", "gripper_state", "object_grasped"])
+
+
+def default_reward_fn(achieved_goal, desired_goal):
+    return -np.linalg.norm(achieved_goal - desired_goal)
+
+
+class SawyerEnv(gym.GoalEnv):
+    def __init__(self,
+                 start_configuration: Configuration,
+                 goal_configuration: Configuration,
+                 reward_fn: Callable = default_reward_fn):
+        pass
+
 
 class SawyerEnv(MujocoEnv, gym.GoalEnv):
     """Sawyer Robot Environments."""
@@ -104,10 +124,11 @@ class SawyerEnv(MujocoEnv, gym.GoalEnv):
 
         self._step += 1
         obs = self.get_obs()
-        if self._has_object:
-            reward_info = dict(gripper_state=obs.get('gripper_state'), obj_pos=obs.get('obj_pos'))
-        else:
-            reward_info = dict(gripper_state=obs.get('gripper_state'))
+        reward_info = dict(obs=obs)
+        # if self._has_object:
+        #     reward_info = dict(gripper_state=obs.get('gripper_state'), obj_pos=obs.get('obj_pos'))
+        # else:
+        #     reward_info = dict(gripper_state=obs.get('gripper_state'))
 
         r = self.compute_reward(
             achieved_goal=obs.get('achieved_goal'),
@@ -216,23 +237,23 @@ class SawyerEnv(MujocoEnv, gym.GoalEnv):
                 # select a random position within 3 circles
                 ind = np.random.randint(0, 3)
                 if ind == 0:
-                    center = self.sim.data.get_geom_xpos('range1')
+                    center = self.sim.data.get_geom_xpos('target1')
                 elif ind == 1:
-                    center = self.sim.data.get_geom_xpos('range2')
+                    center = self.sim.data.get_geom_xpos('target2')
                 else:
-                    center = self.sim.data.get_geom_xpos('range3')
+                    center = self.sim.data.get_geom_xpos('target3')
                 radius = np.random.uniform(0., 1.) * 0.1
                 theta = np.random.uniform(0., 1.) * 2 * np.pi
 
                 x = radius * np.cos(theta)
                 y = radius * np.sin(theta)
-                pos = np.array([center[0]+x, center[1]+y, 0.025])
+                pos = np.array([center[0] + x, center[1] + y, 0.025])
                 quat = np.array([1, 0, 0, 0])
 
                 self.sim.data.set_joint_qpos('object0:joint', np.concatenate((pos, quat)))
                 self.sim.forward()
 
-        #Move the gripper above the object
+        # Move the gripper above the object
         object_pos = self.sim.data.get_site_xpos('object0').copy()
         object_pos[2] += 0.3
         reset_mocap2body_xpos(self.sim)
@@ -254,7 +275,7 @@ class SawyerEnv(MujocoEnv, gym.GoalEnv):
         contacts = tuple()
         for coni in range(self.sim.data.ncon):
             con = self.sim.data.contact[coni]
-            contacts += ((con.geom1, con.geom2), )
+            contacts += ((con.geom1, con.geom2),)
         if ((38, 2) in contacts or (2, 38) in contacts) and ((33, 2) in contacts or (38, 2) in contacts):
             return True
         else:
@@ -266,7 +287,6 @@ def ppo_info(info):
         "episode": info
     }
     return ppo_infos
-
 
 
 class SawyerEnvWrapper():

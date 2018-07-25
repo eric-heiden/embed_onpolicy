@@ -5,7 +5,6 @@ from sawyer_env import SawyerEnv
 
 class DownEnv(SawyerEnv):
 
-
     def __init__(self, for_her=True):
         initial_qpos = {
             'right_j0': -0.140923828125,
@@ -48,7 +47,9 @@ class DownEnv(SawyerEnv):
             penalize_object_xy_motion = np.linalg.norm(obj_pos[:2] - np.array(self._goal[:2]))
 
             achieved_dist = self._goal_distance(gripper_pos, self._goal)
-            reward = - achieved_dist / self._goal_distance(self._start_pos, self._goal) - penalize_gripper_xy_motion - penalize_object_xy_motion
+            reward = - achieved_dist / self._goal_distance(self._start_pos, self._goal)
+            reward -= penalize_gripper_xy_motion
+            reward -= penalize_object_xy_motion
         elif self._reward_type == 'sparse':
             reward = -(self._goal_distance(achieved_goal, desired_goal) > self._distance_threshold).astype(np.float32)
         else:

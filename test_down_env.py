@@ -1,3 +1,9 @@
+import sys
+import os.path as osp
+
+sys.path.insert(0, osp.join(osp.dirname(__file__), 'baselines'))
+sys.path.insert(0, osp.join(osp.dirname(__file__), 'garage'))
+
 from sawyer_down_env import DownEnv
 
 env = DownEnv()
