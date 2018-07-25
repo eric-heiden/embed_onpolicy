@@ -1,3 +1,6 @@
+"""
+TODO: fix the sawyer env observation space(should be a dictionary)
+"""
 import gym
 from gym.envs.robotics import rotations
 from gym.envs.robotics.utils import reset_mocap_welds, reset_mocap2body_xpos
