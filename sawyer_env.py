@@ -86,7 +86,7 @@ class SawyerEnv(MujocoEnv, gym.GoalEnv):
     @overrides
     @property
     def observation_space(self):
-        return gym.spaces.Box(low=-np.inf, high=np.inf, shape=self.get_obs().shape, dtype=np.float32)
+        return gym.spaces.Box(low=-np.inf, high=np.inf, shape=self.get_obs()['observation'].shape, dtype=np.float32)
 
     def step(self, action):
         action = np.array(action).flatten()
@@ -94,6 +94,7 @@ class SawyerEnv(MujocoEnv, gym.GoalEnv):
             self.forward_dynamics(action)
             self.sim.forward()
         else:
+            action *= 0.05
             reset_mocap2body_xpos(self.sim)
             self.sim.data.mocap_pos[0, :3] = self.sim.data.mocap_pos[0, :3] + action[:3]
             self.sim.data.mocap_quat[0, :4] = np.array([0, 1, 1, 0])
@@ -114,18 +115,20 @@ class SawyerEnv(MujocoEnv, gym.GoalEnv):
             desired_goal=obs.get('desired_goal'),
             info=reward_info
         )
+        is_success = self.is_success()
+        if is_success:
+            r = 10
+        self.rew += r
 
         done = self.is_done()
-        is_success = self.is_success()
         info = {
             "l": self._step,
-            "r": r,
+            "r": self.rew,
             "d": done,
             "is_success": is_success
         }
         if self._has_object:
             info['grasped'] = obs.get('gripper_state')[1]
-
         return obs, r, done, info
 
     def set_gripper_state(self, state):
@@ -209,6 +212,7 @@ class SawyerEnv(MujocoEnv, gym.GoalEnv):
     @overrides
     def reset(self, init_state=None):
         self._step = 0
+        self.rew = 0
         super(SawyerEnv, self).reset(init_state)
 
         if self._has_object:
@@ -232,7 +236,7 @@ class SawyerEnv(MujocoEnv, gym.GoalEnv):
                 self.sim.data.set_joint_qpos('object0:joint', np.concatenate((pos, quat)))
                 self.sim.forward()
 
-        #Move the gripper above the object
+        # Move the gripper above the object
         object_pos = self.sim.data.get_site_xpos('object0').copy()
         object_pos[2] += 0.3
         reset_mocap2body_xpos(self.sim)
@@ -241,7 +245,7 @@ class SawyerEnv(MujocoEnv, gym.GoalEnv):
         self.set_gripper_state(1)
         for _ in range(400):
             self.sim.step()
-
+        self._goal = self._sample_goal()
         return self.get_obs()
 
     @staticmethod
@@ -268,20 +272,26 @@ def ppo_info(info):
     return ppo_infos
 
 
-
 class SawyerEnvWrapper():
 
-    def __init__(self, env: SawyerEnv, info_callback=ppo_info):
+    def __init__(self, env: SawyerEnv, info_callback=ppo_info, use_max_path_len=True):
         self.env = env
         self._info_callback = info_callback
+        self._use_max_path_len = use_max_path_len
 
     def step(self, action):
         goal_env_obs, r, done, info = self.env.step(action=action)
-        return goal_env_obs.get('obs'), r, done, self._info_callback(info)
+        if self._use_max_path_len:
+            if done or self.env._step >= self.env._max_episode_steps:
+                goal_env_obs = self.env.reset()
+            else:
+                info = dict()
+            done = False
+        return goal_env_obs.get('observation'), r, done, self._info_callback(info)
 
     def reset(self, init_state=None):
         goal_env_obs = self.env.reset(init_state)
-        return goal_env_obs.get('obs')
+        return goal_env_obs.get('observation')
 
     def render(self, mode='human'):
         self.env.render(mode)
