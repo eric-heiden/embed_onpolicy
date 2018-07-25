@@ -23,7 +23,8 @@ class DownEnv(SawyerEnv):
                 start_pos=np.array([0.65, 0.0, 0.1]),
                 has_object=True,
                 reward_type='dense',
-                distance_threshold=0.03
+                distance_threshold=0.05,
+                max_episode_steps=100,
             )
         else:
             super(DownEnv, self).__init__(
@@ -32,9 +33,10 @@ class DownEnv(SawyerEnv):
                 initial_qpos=initial_qpos,
                 start_pos=np.array([0.65, 0.0, 0.1]),
                 has_object=True,
-                reward_type='dense',
-                distance_threshold=0.03,
-                use_gripper_as_ag=False
+                reward_type='shaped',
+                distance_threshold=0.05,
+                use_gripper_as_ag=False,
+                max_episode_steps=100
             )
 
     def compute_reward(self, achieved_goal, desired_goal, info):
@@ -64,3 +66,6 @@ class DownEnv(SawyerEnv):
 
     def is_done(self):
         return self.is_success()
+
+    def _sample_goal(self):
+        return self.sim.data.get_site_xpos('object0').copy()
