@@ -133,10 +133,11 @@ class SawyerEnv(MujocoEnv, gym.GoalEnv):
     def action_space(self):
         if self._control_method == 'torque_control':
             return super(SawyerEnv, self).action_space
-        elif self._control_method == 'task_space_control':
-            return Box(np.array([-0.05, -0.05, -0.05, -1.]), np.array([0.05, 0.05, 0.05, 1.]), dtype=np.float32)
+        # elif self._control_method == 'task_space_control':
         else:
-            raise NotImplementedError()
+            return Box(np.array([-0.15, -0.15, -0.15, -1.]), np.array([0.15, 0.15, 0.15, 1.]), dtype=np.float32)
+        # else:
+        #     raise NotImplementedError()
 
     @overrides
     @property
@@ -224,7 +225,7 @@ class SawyerEnv(MujocoEnv, gym.GoalEnv):
         grasped = self.has_object
         obs = np.concatenate([
             gripper_pos,
-            object_pos.ravel(),  # remove object_pos (reveals task id)
+            object_pos.ravel(),  # TODO remove object_pos (reveals task id)
             object_rel_pos.ravel(),
             object_rot.ravel(),
             object_velp.ravel(),
@@ -283,6 +284,7 @@ class SawyerEnv(MujocoEnv, gym.GoalEnv):
 
 
 def ppo_info(info):
+    info["task"] = [1]
     ppo_infos = {
         "episode": info
     }
@@ -298,16 +300,16 @@ class SawyerEnvWrapper():
 
     def step(self, action):
         goal_env_obs, r, done, info = self.env.step(action=action)
-        if self._use_max_path_len:
-            if done or self.env._step >= self.env._max_episode_steps:
-                goal_env_obs = self.env.reset()
-            else:
-                info = dict()
-            done = False
+        # if self._use_max_path_len:
+        #     if done or self.env._step >= self.env._max_episode_steps:
+        #         goal_env_obs = self.env.reset()
+        #     else:
+        #         info = dict()
+        #     done = False
         return goal_env_obs.get('observation'), r, done, self._info_callback(info)
 
-    def reset(self, init_state=None):
-        goal_env_obs = self.env.reset(init_state)
+    def reset(self):
+        goal_env_obs = self.env.reset()
         return goal_env_obs.get('observation')
 
     def render(self, mode='human'):
