@@ -20,9 +20,7 @@ from baselines.her.rollout import RolloutWorker
 from baselines.her.util import mpi_fork
 from baselines.her.experiment.config import cached_make_env
 
-from sawyer_pick_and_place import TaskPickAndPlaceEnv
-
-from subprocess import CalledProcessError
+from sawyer_down_env import DownEnv
 
 
 def mpi_average(value):
@@ -96,7 +94,8 @@ def prepare_params(kwargs):
     ddpg_params = dict()
 
     def make_env():
-        return TaskPickAndPlaceEnv(for_her=True)
+        env = DownEnv(for_her=True)
+        return env
     kwargs['make_env'] = make_env
     tmp_env = cached_make_env(kwargs['make_env'])
     assert hasattr(tmp_env, '_max_episode_steps')
@@ -222,7 +221,7 @@ def launch(
 
 @click.command()
 @click.option('--n_epochs', type=int, default=50, help='the number of training epochs to run')
-@click.option('--num_cpu', type=int, default=8, help='the number of CPU cores to use (using MPI)')
+@click.option('--num_cpu', type=int, default=4, help='the number of CPU cores to use (using MPI)')
 @click.option('--seed', type=int, default=0, help='the random seed used to seed both the environment and the training code')
 @click.option('--policy_save_interval', type=int, default=5, help='the interval with which policy pickles are saved. If set to 0, only the best and latest policy will be pickled.')
 @click.option('--replay_strategy', type=click.Choice(['future', 'none']), default='future', help='the HER replay strategy to be used. "future" uses HER, "none" disables HER.')
