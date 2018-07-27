@@ -1,3 +1,5 @@
+from garage.core import Serializable
+
 from garage.envs.base import Step
 from garage.misc.overrides import overrides
 from garage.envs.mujoco.sawyer.reacher_env import ReacherEnv
@@ -10,15 +12,21 @@ from gym.envs.robotics.utils import mocap_set_action, reset_mocap2body_xpos
 
 import numpy as np
 
-
 TASKS = [
     # (0.6, 0., 0.60),
-    (0.3, -0.3, 0.30), (0.3, 0.3, 0.30),
-    (0.6, 0.0, 0.8)]
+    (0.3, -0.3, 0.30),
+    (0.3, 0.3, 0.30),
+    (0.6, 0.0, 0.8)
+]
 
 
 class TaskReacherEnv(ReacherEnv):
-    def __init__(self, task=0, control_method="position_control", *args, **kwargs):
+    def __init__(self,
+                 task=0,
+                 control_method="position_control",
+                 *args,
+                 **kwargs):
+        Serializable.quick_init(self, locals())
         self._task = task
         self.onehot = np.zeros(len(TASKS))
         self.onehot[self._task] = 1
@@ -35,7 +43,8 @@ class TaskReacherEnv(ReacherEnv):
 
         self._goal = np.array(TASKS[task])
         self.set_position(self._start_pos)
-        print("Instantiating TaskReacherEnv (task = %i, control_mode = %s)" % (self._task, self._control_method))
+        print("Instantiating TaskReacherEnv (task = %i, control_mode = %s)" %
+              (self._task, self._control_method))
 
     @overrides
     @property
@@ -44,14 +53,18 @@ class TaskReacherEnv(ReacherEnv):
             return super(TaskReacherEnv, self).action_space
         elif self._control_method == 'position_control':
             # specify lower action limits
-            return Box(-0.03, 0.03, shape=(3,), dtype=np.float32)
+            return Box(-0.03, 0.03, shape=(3, ), dtype=np.float32)
         else:
             raise NotImplementedError()
 
     @overrides
     @property
     def observation_space(self):
-        return gym.spaces.Box(low=-np.inf, high=np.inf, shape=self.get_obs().shape, dtype=np.float32)
+        return gym.spaces.Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=self.get_obs().shape,
+            dtype=np.float32)
 
     def get_obs(self):
         if self._control_method == 'torque_control':
@@ -62,7 +75,7 @@ class TaskReacherEnv(ReacherEnv):
     @overrides
     def step(self, action):
         # no clipping / rescaling of actions
-        # action = np.clip(action, self.action_space.low, self.action_space.high)
+        action = np.clip(action, self.action_space.low, self.action_space.high)
         # rot_ctrl = np.array([1., 0., 1., 0.])
         # action = np.concatenate([action, rot_ctrl])
         # action, _ = np.split(action, (self.sim.model.nmocap * 7,))
@@ -92,7 +105,8 @@ class TaskReacherEnv(ReacherEnv):
         # reward = 1. - achieved_dist / self._goal_distance(self._start_pos, self._goal) / 2.  # before
         # reward = 1. - achieved_dist / self._goal_distance(np.zeros(3), self._goal) / 2.
         # TODO sparse reward
-        reward = 1. - achieved_dist / self._goal_distance(self._start_pos, self._goal)
+        reward = 1. - achieved_dist / self._goal_distance(
+            self._start_pos, self._goal)
 
         # print(self.initial_pos, achieved_goal)
 

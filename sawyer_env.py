@@ -11,7 +11,9 @@ from garage.misc.overrides import overrides
 from collections import namedtuple
 from typing import Callable, Union, Tuple
 
-Configuration = namedtuple("Configuration", ["gripper_pos", "gripper_state", "object_grasped", "object_pos"])
+Configuration = namedtuple(
+    "Configuration",
+    ["gripper_pos", "gripper_state", "object_grasped", "object_pos"])
 
 
 def default_reward_fn(env, achieved_goal, desired_goal, _info: dict):
@@ -22,7 +24,8 @@ def default_reward_fn(env, achieved_goal, desired_goal, _info: dict):
 
 
 def default_success_fn(env, achieved_goal, desired_goal, _info: dict):
-    return (np.linalg.norm(achieved_goal - desired_goal, axis=-1) < env._distance_threshold).astype(np.float32)
+    return (np.linalg.norm(achieved_goal - desired_goal, axis=-1) <
+            env._distance_threshold).astype(np.float32)
 
 
 def default_achieved_goal_fn(env):
@@ -38,22 +41,26 @@ def default_desired_goal_fn(env):
 class SawyerEnv(MujocoEnv, gym.GoalEnv):
     """Sawyer Robot Environments."""
 
-    def __init__(self,
-                 start_goal_config: Union[Tuple[Configuration, Configuration],
-                                          Callable[[], Tuple[Configuration, Configuration]]],
-                 reward_fn: Callable[..., float] = default_reward_fn,
-                 success_fn: Callable[..., bool] = default_success_fn,
-                 achieved_goal_fn: Callable[..., np.array] = default_achieved_goal_fn,
-                 desired_goal_fn: Callable[..., np.array] = default_desired_goal_fn,
-                 max_episode_steps: int = 50,
-                 completion_bonus: float = 10,
-                 distance_threshold: float = 0.05,
-                 for_her: bool = False,
-                 reward_type: str = 'dense',
-                 control_method: str = 'task_space_control',
-                 file_path: str = './garage/vendor/mujoco_models/pick_and_place.xml',
-                 *args,
-                 **kwargs):
+    def __init__(
+            self,
+            start_goal_config: Union[Tuple[Configuration, Configuration],
+                                     Callable[[], Tuple[Configuration,
+                                                        Configuration]]],
+            reward_fn: Callable[..., float] = default_reward_fn,
+            success_fn: Callable[..., bool] = default_success_fn,
+            achieved_goal_fn: Callable[...,
+                                       np.array] = default_achieved_goal_fn,
+            desired_goal_fn: Callable[..., np.array] = default_desired_goal_fn,
+            max_episode_steps: int = 50,
+            completion_bonus: float = 10,
+            distance_threshold: float = 0.05,
+            for_her: bool = False,
+            reward_type: str = 'dense',
+            control_method: str = 'task_space_control',
+            file_path:
+            str = '/home/rjulian/code/garage/sandbox/embed2learn/external/embed_onpolicy/garage/vendor/mujoco_models/pick_and_place.xml',
+            *args,
+            **kwargs):
         """
         Sawyer Environment.
 
@@ -89,7 +96,8 @@ class SawyerEnv(MujocoEnv, gym.GoalEnv):
         if isinstance(self._start_goal_config, tuple):
             self._start_configuration, self._goal_configuration = self._start_goal_config
         else:
-            self._start_configuration, self._goal_configuration = self._start_goal_config()
+            self._start_configuration, self._goal_configuration = self._start_goal_config(
+            )
 
     def env_setup(self):
         reset_mocap_welds(self.sim)
@@ -124,8 +132,10 @@ class SawyerEnv(MujocoEnv, gym.GoalEnv):
         contacts = tuple()
         for coni in range(self.sim.data.ncon):
             con = self.sim.data.contact[coni]
-            contacts += ((con.geom1, con.geom2),)
-        if ((38, 2) in contacts or (2, 38) in contacts) and ((33, 2) in contacts or (38, 2) in contacts):
+            contacts += ((con.geom1, con.geom2), )
+        if ((38, 2) in contacts or
+            (2, 38) in contacts) and ((33, 2) in contacts or
+                                      (38, 2) in contacts):
             return True
         else:
             return False
@@ -136,12 +146,19 @@ class SawyerEnv(MujocoEnv, gym.GoalEnv):
         if self._control_method == 'torque_control':
             return super(SawyerEnv, self).action_space
         else:
-            return Box(np.array([-0.15, -0.15, -0.15, -1.]), np.array([0.15, 0.15, 0.15, 1.]), dtype=np.float32)
+            return Box(
+                np.array([-0.15, -0.15, -0.15, -1.]),
+                np.array([0.15, 0.15, 0.15, 1.]),
+                dtype=np.float32)
 
     @overrides
     @property
     def observation_space(self):
-        return gym.spaces.Box(low=-np.inf, high=np.inf, shape=self.get_obs()['observation'].shape, dtype=np.float32)
+        return gym.spaces.Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=self.get_obs()['observation'].shape,
+            dtype=np.float32)
 
     def step(self, action):
         # if self._for_her:
@@ -158,7 +175,8 @@ class SawyerEnv(MujocoEnv, gym.GoalEnv):
             self.sim.forward()
         else:
             reset_mocap2body_xpos(self.sim)
-            self.sim.data.mocap_pos[0, :3] = self.sim.data.mocap_pos[0, :3] + action[:3]
+            self.sim.data.mocap_pos[
+                0, :3] = self.sim.data.mocap_pos[0, :3] + action[:3]
             self.sim.data.mocap_quat[:] = np.array([0, 1, 0, 0])
             self.set_gripper_state(action[3])
             for _ in range(1):
@@ -183,10 +201,10 @@ class SawyerEnv(MujocoEnv, gym.GoalEnv):
         r = self.compute_reward(
             achieved_goal=obs.get('achieved_goal'),
             desired_goal=obs.get('desired_goal'),
-            info=info
-        )
+            info=info)
 
-        self._is_success = self._success_fn(self, self._achieved_goal, self._desired_goal, info)
+        self._is_success = self._success_fn(self, self._achieved_goal,
+                                            self._desired_goal, info)
         done = False
         if self._is_success:
             r = self._completion_bonus
@@ -216,7 +234,8 @@ class SawyerEnv(MujocoEnv, gym.GoalEnv):
         qvel = self.sim.data.qvel
 
         object_pos = self.object_position
-        object_rot = rotations.mat2euler(self.sim.data.get_site_xmat('object0'))
+        object_rot = rotations.mat2euler(
+            self.sim.data.get_site_xmat('object0'))
         object_velp = self.sim.data.get_site_xvelp('object0') * dt
         object_velr = self.sim.data.get_site_xvelr('object0') * dt
         object_rel_pos = object_pos - gripper_pos
@@ -284,15 +303,15 @@ class SawyerEnv(MujocoEnv, gym.GoalEnv):
 
 def ppo_info(info):
     info["task"] = [1]
-    ppo_infos = {
-        "episode": info
-    }
+    ppo_infos = {"episode": info}
     return ppo_infos
 
 
 class SawyerEnvWrapper():
-
-    def __init__(self, env: SawyerEnv, info_callback=ppo_info, use_max_path_len=True):
+    def __init__(self,
+                 env: SawyerEnv,
+                 info_callback=ppo_info,
+                 use_max_path_len=True):
         self.env = env
         self._info_callback = info_callback
         self._use_max_path_len = use_max_path_len
@@ -305,7 +324,8 @@ class SawyerEnvWrapper():
         #     else:
         #         info = dict()
         #     done = False
-        return goal_env_obs.get('observation'), r, done, self._info_callback(info)
+        return goal_env_obs.get('observation'), r, done, self._info_callback(
+            info)
 
     def reset(self):
         goal_env_obs = self.env.reset()

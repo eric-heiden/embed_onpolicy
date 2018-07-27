@@ -5,14 +5,11 @@ import numpy as np
 import gym
 import gym.spaces
 
-TASKS = [
-    (3, 0, 0), (-3, 0, 0),
-    (0, 3, 0), (0, -3, 0),
-    (0, 0, 3), (0, 0, -3)]
+TASKS = [(3, 0, 0), (-3, 0, 0), (0, 3, 0), (0, -3, 0), (0, 0, 3), (0, 0, -3)]
 
 MIN_DIST = 0.5
 
-ACTION_LIMIT = 0.2  # TODO revert to 0.1
+ACTION_LIMIT = 0.1  # TODO revert to 0.1
 
 
 class Point3dEnv(gym.Env):
@@ -26,11 +23,16 @@ class Point3dEnv(gym.Env):
 
     @property
     def observation_space(self):
-        return gym.spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float32)
+        return gym.spaces.Box(
+            low=-np.inf, high=np.inf, shape=(3, ), dtype=np.float32)
 
     @property
     def action_space(self):
-        return gym.spaces.Box(low=-ACTION_LIMIT, high=ACTION_LIMIT, shape=(3,), dtype=np.float32)
+        return gym.spaces.Box(
+            low=-ACTION_LIMIT,
+            high=ACTION_LIMIT,
+            shape=(3, ),
+            dtype=np.float32)
 
     @property
     def task(self):
@@ -72,19 +74,19 @@ class Point3dEnv(gym.Env):
     def step(self, action):
         # l, h = -ACTION_LIMIT, ACTION_LIMIT
         # action = action * (h - l) + l
-        # action = np.clip(action, -ACTION_LIMIT, ACTION_LIMIT)
+        action = np.clip(action, -ACTION_LIMIT, ACTION_LIMIT)
         # action *= ACTION_LIMIT
         self._point = self._point + action
         self._step += 1
 
         distance = np.linalg.norm(self._point - self._goal)
-        done = distance < MIN_DIST
+        done = distance < np.linalg.norm(self.action_space.low)
 
-        reward = 1. - distance / np.linalg.norm(self._goal)
+        reward = -distance
 
         # completion bonus
-        if done and distance < MIN_DIST:
-            reward = 20.
+        if done:
+            reward = 100.
 
         onehot = np.zeros(len(TASKS))
         onehot[self._task] = 1
@@ -97,7 +99,7 @@ class Point3dEnv(gym.Env):
             }
         }
 
-        done = False  # TODO remove
+        # done = False  # TODO remove
 
         return np.copy(self._point), reward, done, info
 
