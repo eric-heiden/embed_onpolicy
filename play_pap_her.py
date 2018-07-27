@@ -15,7 +15,7 @@ from baselines.common import set_global_seeds
 import baselines.her.experiment.config as config
 from baselines.her.rollout import RolloutWorker
 
-from run_pap_down_her import prepare_params
+from run_pap_her import prepare_params
 
 from collections import deque
 
@@ -272,7 +272,7 @@ class RenderWorker:
 
 
 @click.command()
-@click.argument('policy_file', type=str, default="/home/eric/.deep-rl-docker/embed_onpolicy/log/reach_her_0_2018-07-26-03-01-06/policy_best.pkl")
+@click.argument('policy_file', type=str, default="/home/eric/.deep-rl-docker/embed_onpolicy/log/reach_her_0_2018-07-27-01-45-21/policy_best.pkl")
 @click.option('--seed', type=int, default=0)
 @click.option('--n_test_rollouts', type=int, default=10)
 @click.option('--render', type=int, default=1)

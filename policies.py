@@ -140,11 +140,15 @@ class MlpEmbedPolicy(object):
 
             with tf.name_scope("action"):
                 action = self.pd.sample(name="action", seed=seed)
+                action_mean = self.pd.mean("action_mean")
+                action_mode = self.pd.mode("action_mode")
 
             l, h = ac_space.low, ac_space.high
             if use_beta:
                 with tf.name_scope("transform_action"):
                     action = action * (h - l) + l
+                    action_mean = action_mean * (h - l) + l
+                    action_mode = action_mode * (h - l) + l
 
             def neg_log_prob(var: tf.Tensor, var_name="var"):
                 with tf.name_scope("neg_log_prob_%s" % var_name):
@@ -157,9 +161,15 @@ class MlpEmbedPolicy(object):
             neglogp0 = neg_log_prob(action, "action")
             self.initial_state = None
 
-        def step(latent, ob, task, *_args, **_kwargs):
+        def step(latent, ob, task, *_args, action_type="sample", **_kwargs):
             # XXX task is only fed for the value function!
-            a, v, neglogp = sess.run([action, vf, neglogp0], {Observation: ob, Embedding: latent, Task: task})
+            if action_type == "mean":
+                a, v, neglogp = sess.run([action_mean, vf, neglogp0], {Observation: ob, Embedding: latent, Task: task})
+            elif action_type == "mode":
+                a, v, neglogp = sess.run([action_mode, vf, neglogp0], {Observation: ob, Embedding: latent, Task: task})
+            else:
+                a, v, neglogp = sess.run([action, vf, neglogp0], {Observation: ob, Embedding: latent, Task: task})
+
             # print("Observation len: ", l, " true:", np.shape(ob))
             return a, v, self.initial_state, neglogp
 

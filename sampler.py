@@ -82,8 +82,9 @@ class Sampler(object):
         for step in range(self.traj_size):
             traj_len += 1
             actions, values, mb_states, neglogpacs = self.model.step(latents, self.obs, onehots, self.states,
-                                                                     self.dones)
-            # TODO revert (the policy is "blind" now)
+                                                                     self.dones,
+                                                                     action_type=("mean" if render else "sample"))
+
             # actions, values, mb_states, neglogpacs = self.model.step(latents, np.zeros_like(self.obs), onehots, self.states,
             #                                                          self.dones)
             # actions, values, mb_states, neglogpacs = self.model.step_from_task(
@@ -113,7 +114,7 @@ class Sampler(object):
             mb_obs.append(self.obs[0].copy())
             mb_rewards.append(rewards)
 
-            mb_tasks.append(infos["episode"]["task"])
+            mb_tasks.append(one_hot)
             # if not np.array_equal(infos["episode"]["task"], one_hot):
             #     raise Exception("env_task != sample_task", infos["episode"]["task"], one_hot)
             mb_latents.append(np.array(latents).flatten())

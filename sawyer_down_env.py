@@ -23,13 +23,14 @@ class DownEnv(SawyerEnv):
 
             start = Configuration(gripper_pos=np.concatenate([center[:2], [0.35]]), gripper_state=1,
                                   object_grasped=False, object_pos=np.concatenate([center[:2], [0.03]]))
-            goal = Configuration(gripper_pos=np.concatenate([center[:2], [0.04]]), gripper_state=1,
+            goal = Configuration(gripper_pos=np.concatenate([center[:2], [0.025]]), gripper_state=1,
                                  object_grasped=False, object_pos=np.concatenate([center[:2], [0.03]]))
 
             return start, goal
 
         def reward_fn(env: SawyerEnv, achieved_goal, desired_goal, info: dict):
             d = np.linalg.norm(achieved_goal - desired_goal, axis=-1)
+            # d = np.linalg.norm(achieved_goal - desired_goal, ord=1, axis=-1)
             if env._reward_type == 'sparse':
                 return (d < env._distance_threshold).astype(np.float32)
 
@@ -40,10 +41,10 @@ class DownEnv(SawyerEnv):
             # else:
             #     d += np.linalg.norm(env._start_configuration.gripper_pos[:2] - info["gripper_position"][:2], axis=-1)
             # keep gripper open
-            d -= np.mean(info["gripper_state"])
+            d -= np.mean(info["gripper_state"]) / 2.
             # don't move the object
-            d += np.linalg.norm(env._start_configuration.object_pos - info["object_position"], axis=-1)
-            return -d
+            # d += np.linalg.norm(env._start_configuration.object_pos - info["object_position"], axis=-1) / 2.
+            return .01 - d
 
         super(DownEnv, self).__init__(start_goal_config=generate_start_goal, reward_fn=reward_fn, **kwargs)
 

@@ -30,6 +30,8 @@ def default_achieved_goal_fn(env):
 
 
 def default_desired_goal_fn(env):
+    if env._goal_configuration.object_grasped and not env.has_object:
+        return env.object_position
     return env._goal_configuration.gripper_pos
 
 
@@ -133,11 +135,8 @@ class SawyerEnv(MujocoEnv, gym.GoalEnv):
     def action_space(self):
         if self._control_method == 'torque_control':
             return super(SawyerEnv, self).action_space
-        # elif self._control_method == 'task_space_control':
         else:
             return Box(np.array([-0.15, -0.15, -0.15, -1.]), np.array([0.15, 0.15, 0.15, 1.]), dtype=np.float32)
-        # else:
-        #     raise NotImplementedError()
 
     @overrides
     @property
@@ -151,7 +150,7 @@ class SawyerEnv(MujocoEnv, gym.GoalEnv):
         #     # actions are in [0, 1]
         #     action = action * (self.action_space.high - self.action_space.low) + self.action_space.low
 
-        action = np.clip(action, self.action_space.low, self.action_space.high)
+        # action = np.clip(action, self.action_space.low, self.action_space.high)
 
         # action = np.array(action).flatten()
         if self._control_method == "torque_control":

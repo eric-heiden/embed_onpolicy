@@ -105,3 +105,6 @@ venv.bak/
 
 # PyCharm
 .idea/
+
+# videos
+*.mp4

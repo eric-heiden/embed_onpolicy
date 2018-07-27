@@ -1,19 +1,12 @@
-import itertools
 import os
+import os.path as osp
 import sys
 import time
-from functools import partial
-from itertools import repeat
-
-import dill
-import cloudpickle
-from pathos import pools
+from collections import deque
 
 import imageio
 import numpy as np
-import os.path as osp
 import tensorflow as tf
-from collections import deque
 
 from curriculum import BasicCurriculum, ReverseCurriculum
 from model import Model
@@ -39,11 +32,11 @@ def safemean(xs):
 
 
 def learn(*, policy, env_fn, unwrap_env, task_space, latent_space, traj_size,
-                               nbatches, total_timesteps,
+          nbatches, total_timesteps,
           policy_entropy, embedding_entropy, inference_coef, inference_horizon, lr,
           vf_coef=0.5, max_grad_norm=0.5, gamma=0.99, lam=0.95,
           log_interval=10, inference_opt_epochs=4, cliprange=0.2, seed=None,
-          save_interval=500, load_path=None, plot_interval=50, plot_event_interval=200,
+          save_interval=50, load_path=None, plot_interval=50, plot_event_interval=200,
           plot_folder=None, traj_plot_fn=None, log_folder=None,
           render_interval=-1, render_fn=None, curriculum_fn=BasicCurriculum,
           **kwargs):
@@ -79,14 +72,39 @@ def learn(*, policy, env_fn, unwrap_env, task_space, latent_space, traj_size,
                                **kwargs)
     if save_interval and logger.get_dir():
         import cloudpickle
-        with open(osp.join(logger.get_dir(), 'make_model.pkl'), 'wb') as fh:
-            fh.write(cloudpickle.dumps(make_model))
+        with open(osp.join(logger.get_dir(), 'configuration.pkl'), 'wb') as fh:
+            fh.write(cloudpickle.dumps({
+                "make_model": make_model,
+                "make_env": env_fn,
+                "render_fn": render_fn,
+                "traj_plot_fn": traj_plot_fn,
+                "unwrap_env_fn": unwrap_env,
+                "traj_size": traj_size,
+                "task_space": task_space,
+                "latent_space": latent_space,
+                "curriculum_fn": curriculum_fn,
+                "seed": seed,
+                "gamma": gamma,
+                "lambda": lam,
+                "vf_coef": vf_coef,
+                "policy_entropy": policy_entropy,
+                "embedding_entropy": embedding_entropy,
+                "inference_horizon": inference_horizon,
+                "max_grad_norm": max_grad_norm,
+                "nbatches": nbatches,
+                "total_timesteps": total_timesteps,
+                "cliprange": cliprange,
+                "lr": lr,
+                "plot_folder": plot_folder
+            }))
     model = make_model()
     if load_path is not None:
         model.load(load_path)
 
-    sampler = Sampler(env=env, unwrap_env=unwrap_env, model=model, traj_size=traj_size, inference_opt_epochs=inference_opt_epochs,
-                      inference_coef=inference_coef, gamma=gamma, lam=lam)
+    sampler = Sampler(env=env, unwrap_env=unwrap_env, model=model, traj_size=traj_size,
+                      inference_opt_epochs=inference_opt_epochs,
+                      inference_coef=inference_coef,
+                      gamma=gamma, lam=lam)
 
     curriculum = curriculum_fn(env_fn, unwrap_env=unwrap_env, batches=nbatches, tasks=ntasks)
 
@@ -107,8 +125,6 @@ def learn(*, policy, env_fn, unwrap_env, task_space, latent_space, traj_size,
         summary_writer.add_summary(tf.Summary(value=[tf.Summary.Value(tag=key,
                                                                       simple_value=value)]), update)
 
-    pool = pools.ProcessPool(8)
-
     nupdates = total_timesteps // traj_size
     for update in range(1, nupdates + 1):
         tstart = time.time()
@@ -128,16 +144,17 @@ def learn(*, policy, env_fn, unwrap_env, task_space, latent_space, traj_size,
 
         for task, envs in enumerate(curriculum.strategy):
             for i_batch, env in enumerate(envs):
-                if render_fn is not None and render_interval > 0 and (update == 1 or update % render_interval == 0) and i_batch == 0:
+                if render_fn is not None and render_interval > 0 and (
+                        update == 1 or update % render_interval == 0) and i_batch == 0:
                     rf = render_fn(task, update)
                     obs, returns, masks, actions, values, neglogpacs, latents, tasks, states, epinfos, \
-                        completions, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods, \
-                        inference_means, inference_stds, sampled_video = sampler.run(env, task, render=rf)
+                    completions, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods, \
+                    inference_means, inference_stds, sampled_video = sampler.run(env, task, render=rf)
                     video += sampled_video
                 else:
                     obs, returns, masks, actions, values, neglogpacs, latents, tasks, states, epinfos, \
-                        completions, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods, \
-                        inference_means, inference_stds = sampler.run(env, task)
+                    completions, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods, \
+                    inference_means, inference_stds = sampler.run(env, task)
                 epinfobuf.extend(epinfos)
                 training_batches.append((obs, tasks, returns, masks, actions, values, neglogpacs, states))
                 visualization_batches.append((obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos,

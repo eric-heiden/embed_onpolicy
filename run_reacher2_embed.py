@@ -23,15 +23,15 @@ from baselines.common import set_global_seeds
 from baselines.common.vec_env.dummy_vec_env import DummyVecEnv
 from baselines.common.vec_env.vec_normalize import VecNormalize
 
-from sawyer_down_env import DownEnv
 from sawyer_env import SawyerEnv, SawyerEnvWrapper
+from sawyer_reach_env import ReachEnv
 
 from policies import MlpEmbedPolicy
 import ppo2embed
 
 SEED = 12345
 TRAJ_SIZE = 50
-TASKS = [None]
+TASKS = [(0.3, -0.3, 0.30), (0.3, 0.3, 0.30)]
 
 # use Beta distribution for policy, Gaussian otherwise
 USE_BETA = True
@@ -98,7 +98,7 @@ def train(num_timesteps, seed, log_folder):
     latent_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(1,), dtype=np.float32)
 
     env_fn = lambda task: VecNormalize(
-        DummyVecEnv([lambda: SawyerEnvWrapper(DownEnv())]),
+        DummyVecEnv([lambda: SawyerEnvWrapper(ReachEnv(goal_position=TASKS[task]))]),
         ob=False, ret=False
     )
     env_ = unwrap_env(env_fn(task=0))
@@ -149,9 +149,8 @@ def train(num_timesteps, seed, log_folder):
         ax.set_ylim([-.5, .5])
         ax.set_zlim([0, 1])
 
-    font = ImageFont.truetype("Consolas.ttf", 32)
-
     def render_robot(task: int, iteration: int):
+        font = ImageFont.truetype("Consolas.ttf", 32)
         orange = np.array([255, 163, 0])
         red = np.array([255, 0, 0])
         blue = np.array([20, 163, 255])
@@ -217,22 +216,22 @@ def train(num_timesteps, seed, log_folder):
                     task_space=task_space,
                     latent_space=latent_space,
                     traj_size=TRAJ_SIZE,
-                    nbatches=15,
+                    nbatches=50,
                     lam=0.95,
                     gamma=0.99,
-                    policy_entropy=0.01, #.01,  # 0.1,
-                    embedding_entropy=0.,  # -0.01,  # 0.01,
-                    inference_coef=0.,  # .001,
-                    inference_opt_epochs=1,  # 3,
+                    policy_entropy=0.1, #.01,  # 0.1,
+                    embedding_entropy=-0.01,  # -0.01,  # 0.01,
+                    inference_coef=0.01,  # .001,
+                    inference_opt_epochs=3,  # 3,
                     inference_horizon=3,
                     log_interval=1,
                     em_hidden_layers=(2,),
-                    pi_hidden_layers=(64, 64, 64),
-                    vf_hidden_layers=(64, 64, 64),
+                    pi_hidden_layers=(32, 32),
+                    vf_hidden_layers=(32, 32),
                     inference_hidden_layers=(16,),
                     render_fn=render_robot,
-                    lr=3e-4,
-                    cliprange=0.1,
+                    lr=5e-3,
+                    cliprange=0.2,
                     seed=seed,
                     total_timesteps=num_timesteps,
                     plot_folder=osp.join(log_folder, "plots"),
@@ -247,7 +246,7 @@ def train(num_timesteps, seed, log_folder):
 
 def main():
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-    log_folder = osp.join(osp.dirname(__file__), 'log/pap_down_embed_%i_%s' % (SEED, timestamp))
+    log_folder = osp.join(osp.dirname(__file__), 'log/reacher2_embed_%i_%s' % (SEED, timestamp))
     print("Logging to %s." % log_folder)
     logger.configure(dir=log_folder, format_strs=['stdout', 'log', 'csv'])
     train(num_timesteps=1e6, seed=SEED, log_folder=log_folder)
