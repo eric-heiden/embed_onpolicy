@@ -38,7 +38,8 @@ def train(num_timesteps, seed, log_folder):
 
     env_fn = lambda task: DummyVecEnv([lambda: Point3dEnv(task=task)])
 
-    # env = VecNormalize(env, ob=True, ret=False, cliprew=200)
+    def unwrap_env(env: DummyVecEnv):
+        return env.envs[0]
 
     def plot_traj(fig, where, task, batch_tuple_size, batches, colormap):
         import matplotlib.pyplot as plt
@@ -49,9 +50,6 @@ def train(num_timesteps, seed, log_folder):
         ax.set_aspect("equal")
         ax.set_xlabel('x')
         ax.set_ylabel('y')
-
-        # ax.scatter([0], [0], [0], s=16, c='black')
-        # ax.scatter([TASKS[task][0]], [TASKS[task][1]], [TASKS[task][2]], s=16, c='orange')
 
         ax.scatter([0], [0], s=9, c='black', zs=-5, zdir='x', zorder=1)
         ax.scatter([TASKS[task][1]], [TASKS[task][2]], s=16, c='orange', zs=-5, zdir='x', zorder=1)
@@ -66,7 +64,7 @@ def train(num_timesteps, seed, log_folder):
             # bs = tuple([np.array([batch[i][k] for i in range(len(batch))]) for k in range(batch_tuple_size)])
             obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos, \
             inference_means, inference_stds = tuple(batch)
-            pos = [epinfo["episode"]["position"] for epinfo in epinfos]
+            pos = np.array([epinfo["position"] for epinfo in epinfos])
             # ax.plot([0] + obs[:, 0], [0] + obs[:, 1], [0] + obs[:, 2], color=colormap(i * 1. / len(batches)),
             #              zorder=2, linewidth=.5, marker='o', markersize=0.5, alpha=0.1)
             ax.plot([0] + pos[:, 1], [0] + pos[:, 2], color=colormap(i * 1. / len(batches)),
@@ -84,10 +82,11 @@ def train(num_timesteps, seed, log_folder):
     policy = lambda *args, **kwargs: MlpEmbedPolicy(*args, **kwargs, use_beta=USE_BETA)
     ppo2embed.learn(policy=policy,
                     env_fn=env_fn,
+                    unwrap_env=unwrap_env,
                     task_space=task_space,
                     latent_space=latent_space,
                     traj_size=40,
-                    nbatches=4,
+                    nbatches=16,
                     lam=0.95,
                     gamma=0.99,
                     inference_opt_epochs=5,
@@ -96,9 +95,9 @@ def train(num_timesteps, seed, log_folder):
                     embedding_entropy=-0.1,  # TODO was 0.01 (need to regulate it!)
                     inference_coef=.001,
                     inference_horizon=3,
-                    em_hidden_layers=(16,),
-                    pi_hidden_layers=(32, 32),
-                    vf_hidden_layers=(32, 32),
+                    em_hidden_layers=(8,),
+                    pi_hidden_layers=(8, 8),
+                    vf_hidden_layers=(8, 8),
                     inference_hidden_layers=(16,),
                     lr=5e-3,
                     cliprange=0.2,
@@ -107,7 +106,7 @@ def train(num_timesteps, seed, log_folder):
                     plot_folder=osp.join(log_folder, "plots"),
                     traj_plot_fn=plot_traj,
                     log_folder=log_folder,
-                    curriculum_fn=ReverseCurriculum)
+                    curriculum_fn=BasicCurriculum)
 
 
 def main():

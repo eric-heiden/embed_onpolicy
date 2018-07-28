@@ -126,9 +126,11 @@ class MlpEmbedPolicy(object):
             if use_beta:
                 # use Beta distribution
                 with tf.name_scope("PolicyDist_beta"):
-                    alpha = tf.nn.softplus(fc(pi_input, 'pi_alpha1', ac_space.shape[0], init_scale=1., init_bias=1.), name='pi_alpha')
-                    beta = tf.nn.softplus(fc(pi_input, 'pi_beta1', ac_space.shape[0], init_scale=1., init_bias=1.), name='pi_beta')
-                    self.pd = tf.distributions.Beta(alpha + 1. + EPS, beta + 1. + EPS, validate_args=False, name="PolicyDist_beta")
+                    alpha = tf.nn.softplus(fc(pi_input, 'pi_alpha1', ac_space.shape[0], init_scale=1., init_bias=0.), name='pi_alpha')
+                    beta = tf.nn.softplus(fc(pi_input, 'pi_beta1', ac_space.shape[0], init_scale=1., init_bias=0.), name='pi_beta')
+                    clipped_alpha = tf.clip_by_value(alpha, clip_value_min=EPS, clip_value_max=-np.log(EPS))
+                    clipped_beta = tf.clip_by_value(beta, clip_value_min=EPS, clip_value_max=-np.log(EPS))
+                    self.pd = tf.distributions.Beta(clipped_alpha, clipped_beta, validate_args=False, name="PolicyDist_beta")
             else:
                 # use Gaussian distribution
                 with tf.name_scope("PolicyDist_normal"):

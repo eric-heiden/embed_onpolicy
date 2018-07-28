@@ -10,13 +10,13 @@ TASKS = [
     (0, 3, 0), (0, -3, 0),
     (0, 0, 3), (0, 0, -3)]
 
-MIN_DIST = 0.5
+MIN_DIST = 0.25
 
-ACTION_LIMIT = 0.2  # TODO revert to 0.1
+ACTION_LIMIT = 0.15
 
 
 class Point3dEnv(gym.Env):
-    def __init__(self, task: int = 0, show_traces=True):
+    def __init__(self, task: int = 0):
         self._task = task
         self._goal = np.array(TASKS[self._task], dtype=np.float32)
         self._point = np.zeros(3)
@@ -70,10 +70,6 @@ class Point3dEnv(gym.Env):
         return np.copy(self._point)
 
     def step(self, action):
-        # l, h = -ACTION_LIMIT, ACTION_LIMIT
-        # action = action * (h - l) + l
-        # action = np.clip(action, -ACTION_LIMIT, ACTION_LIMIT)
-        # action *= ACTION_LIMIT
         self._point = self._point + action
         self._step += 1
 
@@ -84,7 +80,7 @@ class Point3dEnv(gym.Env):
 
         # completion bonus
         if done and distance < MIN_DIST:
-            reward = 20.
+            reward = 100.
 
         onehot = np.zeros(len(TASKS))
         onehot[self._task] = 1
@@ -93,11 +89,10 @@ class Point3dEnv(gym.Env):
                 "l": self._step,
                 "r": reward,
                 "d": done,
-                "task": np.copy(onehot)
+                "task": np.copy(onehot),
+                "position": self._point.copy()
             }
         }
-
-        done = False  # TODO remove
 
         return np.copy(self._point), reward, done, info
 
