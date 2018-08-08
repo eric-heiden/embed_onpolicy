@@ -5,3 +5,7 @@
 	path = garage
 	url = https://github.com/rlworkgroup/garage.git
 	branch = eric-sawyer-fix
+[submodule "multiworld"]
+	path = multiworld
+	url = https://github.com/vitchyr/multiworld.git
+	branch = russell

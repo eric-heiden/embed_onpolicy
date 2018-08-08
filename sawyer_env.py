@@ -177,7 +177,8 @@ class SawyerEnv(MujocoEnv, gym.GoalEnv):
             "gripper_state": obs["gripper_state"],
             "gripper_position": obs["gripper_pos"],
             "object_position": obs["object_pos"],
-            "is_success": self._is_success
+            "is_success": self._is_success,
+            "joints": obs["joints"]
         }
 
         r = self.compute_reward(
@@ -250,7 +251,8 @@ class SawyerEnv(MujocoEnv, gym.GoalEnv):
             'gripper_state': self.gripper_state,
             'gripper_pos': gripper_pos.copy(),
             'has_object': grasped,
-            'object_pos': object_pos.copy()
+            'object_pos': object_pos.copy(),
+            'joints': self.sim.data.qpos.copy()
         }
 
     def is_success(self):

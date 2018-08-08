@@ -58,7 +58,8 @@ class ReachEnv(SawyerEnv):
             'gripper_state': self.gripper_state,
             'gripper_pos': gripper_pos.copy(),
             'has_object': grasped,
-            'object_pos': object_pos.copy()
+            'object_pos': object_pos.copy(),
+            'joints': self.sim.data.qpos.copy()
         }
 
     @overrides
