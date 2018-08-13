@@ -222,9 +222,9 @@ class TaskPickAndPlaceEnv(PickAndPlaceEnv):
         return Step(obs, reward, done, **info)
 
     @overrides
-    def reset(self, init_state=None):
+    def reset(self, **kwargs):
         self._step = 0
-        super(TaskPickAndPlaceEnv, self).reset(init_state)[:3]
+        super(TaskPickAndPlaceEnv, self).reset()[:3]
         # self.set_position(self._start_pos)
         self.select_task(self._task)
         return self.get_obs()

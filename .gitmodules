@@ -4,7 +4,7 @@
 [submodule "garage"]
 	path = garage
 	url = https://github.com/rlworkgroup/garage.git
-	branch = eric-sawyer-fix
+	branch = eric-pushenv
 [submodule "multiworld"]
 	path = multiworld
 	url = https://github.com/vitchyr/multiworld.git

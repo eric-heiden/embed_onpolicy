@@ -38,7 +38,7 @@ def learn(*, policy, env_fn, unwrap_env, task_space, latent_space, traj_size,
           log_interval=10, inference_opt_epochs=4, cliprange=0.2, seed=None,
           save_interval=50, load_path=None, plot_interval=50, plot_event_interval=200,
           plot_folder=None, traj_plot_fn=None, log_folder=None,
-          render_interval=-1, render_fn=None, curriculum_fn=BasicCurriculum,
+          render_interval=-1, render_fn=None, render_fps=20, curriculum_fn=BasicCurriculum,
           **kwargs):
     if isinstance(lr, float):
         lr = constfn(lr)
@@ -167,7 +167,7 @@ def learn(*, policy, env_fn, unwrap_env, task_space, latent_space, traj_size,
         completion_ratios /= 1. * nbatches
 
         if len(video) > 0 and plot_folder is not None:
-            imageio.mimsave(osp.join(plot_folder, 'embed_%05d.mp4' % update), video, fps=20)
+            imageio.mimsave(osp.join(plot_folder, 'embed_%05d.mp4' % update), video, fps=render_fps)
 
         train_return = model.train(lrnow, cliprangenow, training_batches)
         train_latents = train_return[-2]

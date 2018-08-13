@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+MUJOCO_LOG.TXT
 
 # C extensions
 *.so
