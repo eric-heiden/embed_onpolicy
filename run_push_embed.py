@@ -32,7 +32,7 @@ import ppo2embed
 SEED = 1234
 TRAJ_SIZE = 150
 TASKS = ["up" , "down", "left", "right"]
-CONTROL_MODE = "task_space_control"  # "position_control"  # "task_space_control"
+CONTROL_MODE = "position_control"  # "task_space_control"
 EASY_GRIPPER_INIT = True
 
 # use Beta distribution for policy, Gaussian otherwise
@@ -176,15 +176,16 @@ def train(num_timesteps, seed, log_folder):
                     nbatches=16,
                     lam=0.95,
                     gamma=0.99,
-                    policy_entropy=0.01, #.01,  # 0.1,
+                    policy_entropy=0.1, #.01,  # 0.1,
                     embedding_entropy=-0.5,  # -0.01,  # 0.01,
-                    inference_coef=0.1,  # .001,
+                    inference_coef=0.001,  # .001,
                     inference_opt_epochs=3,  # 3,
                     inference_horizon=3,
                     log_interval=1,
-                    em_hidden_layers=(2,),
-                    pi_hidden_layers=(8, 8),
-                    vf_hidden_layers=(8, 8),
+                    em_hidden_layers=(4,),
+                    pi_hidden_layers=(16, 16),
+                    vf_hidden_layers=(16, 16),
+                    #vf_coef=1e-4,
                     inference_hidden_layers=(16,),
                     render_fn=render_robot,
                     lr=1e-4,
