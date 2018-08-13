@@ -116,8 +116,8 @@ class MlpEmbedPolicy(object):
             # value function
             with tf.name_scope("vf"):
                 tiled_t = tf.tile(Task, (traj_size, 1), name="tiled_task")[:tf.shape(Observation)[0]]
-                vf_input = tf.concat((processed_ob, tiled_t), axis=1, name="ob_task")
-                # vf_input = tf.concat((Embedding, processed_ob, tiled_t), axis=1, name="em_ob_task")
+                # vf_input = tf.concat((processed_ob, tiled_t), axis=1, name="ob_task")
+                vf_input = tf.concat((self.tiled_em, processed_ob, tiled_t), axis=1, name="em_ob_task")
                 for i, units in enumerate(vf_hidden_layers):
                     vf_h = activation_fn(fc(vf_input, 'vf_fc%i' % (i+1), nh=units, init_scale=np.sqrt(2)), name="vf_h%i" % (i+1))
                     vf_input = vf_h

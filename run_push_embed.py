@@ -31,12 +31,12 @@ import ppo2embed
 
 SEED = 1234
 TRAJ_SIZE = 150
-TASKS = ["up"]  # , "down", "left", "right"]
+TASKS = ["up" , "down", "left", "right"]
 CONTROL_MODE = "task_space_control"  # "position_control"  # "task_space_control"
 EASY_GRIPPER_INIT = True
 
 # use Beta distribution for policy, Gaussian otherwise
-USE_BETA = False
+USE_BETA = True
 
 
 def unwrap_env(env: VecNormalize, id: int = 0):
@@ -50,15 +50,15 @@ def train(num_timesteps, seed, log_folder):
     tf.Session(config=config).__enter__()
 
     task_space = gym.spaces.Box(low=0, high=1, shape=(len(TASKS),), dtype=np.float32)
-    latent_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(1,), dtype=np.float32)
+    latent_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32)
 
     env_fn = lambda task: VecNormalize(
         DummyVecEnv([lambda: SawyerEnvWrapper(PushEnv(direction=TASKS[task],
                                                       control_method=CONTROL_MODE,
                                                       easy_gripper_init=EASY_GRIPPER_INIT))]),
-        ob=False, ret=False
+        ob=False, ret=True
     )
-    env_ = unwrap_env(env_fn(task=0))
+    # env_ = unwrap_env(env_fn(task=0))
     # print("Start position:", env_.start_position)
 
     # env = VecNormalize(env, ob=True, ret=False, cliprew=200)
@@ -78,7 +78,7 @@ def train(num_timesteps, seed, log_folder):
 
         # start_pos = env_.start_position
 
-        LIMITS = [0, .5, 0]
+        LIMITS = [0, .5, -.2]
 
         # ax.scatter([start_pos[1]], [start_pos[2]], s=9, c='black', zs=LIMITS[0], zdir='x', zorder=1)
         # ax.scatter([TASKS[task][1]], [TASKS[task][2]], s=16, c='orange', zs=LIMITS[0], zdir='x', zorder=1)
@@ -104,7 +104,7 @@ def train(num_timesteps, seed, log_folder):
 
         ax.set_xlim([0, 1])
         ax.set_ylim([-.5, .5])
-        ax.set_zlim([0, 1])
+        ax.set_zlim([-.2, .6])
 
     def render_robot(task: int, iteration: int):
         font = ImageFont.truetype("Consolas.ttf", 32)
@@ -177,18 +177,18 @@ def train(num_timesteps, seed, log_folder):
                     lam=0.95,
                     gamma=0.99,
                     policy_entropy=0.01, #.01,  # 0.1,
-                    embedding_entropy=-0.1,  # -0.01,  # 0.01,
-                    inference_coef=0,  #0.01,  # .001,
+                    embedding_entropy=-0.5,  # -0.01,  # 0.01,
+                    inference_coef=0.1,  # .001,
                     inference_opt_epochs=3,  # 3,
                     inference_horizon=3,
                     log_interval=1,
-                    em_hidden_layers=(4,),
+                    em_hidden_layers=(2,),
                     pi_hidden_layers=(8, 8),
                     vf_hidden_layers=(8, 8),
                     inference_hidden_layers=(16,),
                     render_fn=render_robot,
-                    lr=1e-3,
-                    cliprange=0.25,
+                    lr=1e-4,
+                    cliprange=0.15,
                     seed=seed,
                     total_timesteps=num_timesteps,
                     plot_folder=osp.join(log_folder, "plots"),
@@ -198,8 +198,6 @@ def train(num_timesteps, seed, log_folder):
                     traj_plot_fn=plot_traj,
                     log_folder=log_folder,
                     curriculum_fn=BasicCurriculum)
-                    # curriculum_fn=lambda *args, **kwargs:
-                    # PickAndPlaceCurriculum(*args, delta_steps=1, return_threshold=100., max_progress=100, **kwargs))
 
 
 def main():
@@ -208,36 +206,6 @@ def main():
     print("Logging to %s." % log_folder)
     logger.configure(dir=log_folder, format_strs=['stdout', 'log', 'csv'])
     train(num_timesteps=1e6, seed=SEED, log_folder=log_folder)
-
-    # env = TaskPickAndPlaceEnv(control_method="position_control")
-    # video = []
-    # font = ImageFont.truetype("Consolas.ttf", 32)
-    # for t in tqdm(range(len(TASKS))):
-    #     env.select_task(t)
-    #     pos = env.reset()
-    #     print(TASKS[t])
-    #     # env.set_position(TASKS[t])
-    #     env.render()
-    #     # action = (0., 0., 0.1)
-    #     for i in range(15):
-    #         # env.step(np.zeros(3))
-    #         env.step(env.action_space.sample())
-    #         env.render_camera = "camera_side"
-    #         # env.render()
-    #         img_left = env.render(mode='rgb_array')
-    #         env.render_camera = "camera_topdown"
-    #         img_center = env.render(mode='rgb_array')
-    #         env.render_camera = "camera_front"
-    #         img_right = env.render(mode='rgb_array')
-    #         img_left = Image.fromarray(np.uint8(img_left))
-    #         draw_left = ImageDraw.Draw(img_left)
-    #         draw_left.text((20, 20), "Task %i" % t, fill="black", font=font)
-    #         img_right = Image.fromarray(np.uint8(img_right))
-    #         draw_right = ImageDraw.Draw(img_right)
-    #         draw_right.text((20, 20), "Iteration %i" % i, fill="black", font=font)
-    #         video.append(np.hstack((np.array(img_left), np.array(img_center), np.array(img_right))))
-    # print("Saving video...")
-    # imageio.mimsave("test.mp4", video, fps=30)
 
 
 if __name__ == '__main__':
