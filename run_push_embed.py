@@ -34,6 +34,7 @@ TRAJ_SIZE = 150
 TASKS = ["up" , "down", "left", "right"]
 CONTROL_MODE = "position_control"  # "task_space_control"
 EASY_GRIPPER_INIT = True
+RANDOMIZE_START_POS = False
 
 # use Beta distribution for policy, Gaussian otherwise
 USE_BETA = True
@@ -55,13 +56,10 @@ def train(num_timesteps, seed, log_folder):
     env_fn = lambda task: VecNormalize(
         DummyVecEnv([lambda: SawyerEnvWrapper(PushEnv(direction=TASKS[task],
                                                       control_method=CONTROL_MODE,
-                                                      easy_gripper_init=EASY_GRIPPER_INIT))]),
+                                                      easy_gripper_init=EASY_GRIPPER_INIT,
+                                                      randomize_start_pos=RANDOMIZE_START_POS))]),
         ob=False, ret=True
     )
-    # env_ = unwrap_env(env_fn(task=0))
-    # print("Start position:", env_.start_position)
-
-    # env = VecNormalize(env, ob=True, ret=False, cliprew=200)
 
     def plot_traj(fig, where, task, batch_tuple_size, batches, colormap):
         import matplotlib.pyplot as plt
@@ -73,28 +71,11 @@ def train(num_timesteps, seed, log_folder):
         ax.set_xlabel('x')
         ax.set_ylabel('y')
 
-        # ax.scatter([0], [0], [0], s=16, c='black')
-        # ax.scatter([TASKS[task][0]], [TASKS[task][1]], [TASKS[task][2]], s=16, c='orange')
-
-        # start_pos = env_.start_position
-
         LIMITS = [0, .5, -.2]
 
-        # ax.scatter([start_pos[1]], [start_pos[2]], s=9, c='black', zs=LIMITS[0], zdir='x', zorder=1)
-        # ax.scatter([TASKS[task][1]], [TASKS[task][2]], s=16, c='orange', zs=LIMITS[0], zdir='x', zorder=1)
-
-        # ax.scatter([start_pos[0]], [start_pos[2]], s=9, c='black', zs=LIMITS[1], zdir='y', zorder=1)
-        # ax.scatter([TASKS[task][0]], [TASKS[task][2]], s=16, c='orange', zs=LIMITS[1], zdir='y', zorder=1)
-
-        # ax.scatter([start_pos[0]], [start_pos[1]], s=9, c='black', zs=LIMITS[2], zdir='z', zorder=1)
-        # ax.scatter([TASKS[task][0]], [TASKS[task][1]], s=16, c='orange', zs=LIMITS[2], zdir='z', zorder=1)
-
         for i, batch in enumerate(batches):
-            # bs = tuple([np.array([batch[i][k] for i in range(len(batch))]) for k in range(batch_tuple_size)])
             obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos, \
             inference_means, inference_stds = tuple(batch)
-            # ax.plot([0] + obs[:, 0], [0] + obs[:, 1], [0] + obs[:, 2], color=colormap(i * 1. / len(batches)),
-            #              zorder=2, linewidth=.5, marker='o', markersize=0.5, alpha=0.1)
             ax.plot(obs[:, 1], obs[:, 2], color=colormap(i * 1. / len(batches)),
                     zorder=2, linewidth=.5, zs=LIMITS[0], zdir='x')
             ax.plot(obs[:, 0], obs[:, 2], color=colormap(i * 1. / len(batches)),
@@ -116,8 +97,6 @@ def train(num_timesteps, seed, log_folder):
         max_reward = 1.
 
         def render(env: SawyerEnv, obs, actions, values, rewards, infos):
-            # assert(env.envs[0]._task == task)
-            # print("TASK %i == %i   %s" % (env.envs[0]._task, task, str(env.envs[0]._goal)))
             env.render_camera = "camera_side"
             img_left = env.render(mode='rgb_array')
             env.render_camera = "camera_topdown"
