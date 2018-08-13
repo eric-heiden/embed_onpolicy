@@ -3,10 +3,9 @@ import os.path as osp
 import numpy as np
 
 sys.path.insert(0, osp.join(osp.dirname(__file__), 'baselines'))
-sys.path.insert(0, '/home/eric/garage_pushenv')
-# sys.path.insert(0, osp.join(osp.dirname(__file__), 'garage'))
+sys.path.insert(0, osp.join(osp.dirname(__file__), 'garage'))
 
-from garage.envs.mujoco.sawyer import PushEnv, PickAndPlaceEnv
+from garage.envs.mujoco.sawyer import PushEnv
 
 directions = ("up", "down", "left", "right")
 env = PushEnv(direction=directions[0], control_method="task_space_control")
