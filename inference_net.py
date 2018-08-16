@@ -39,13 +39,14 @@ class InferenceNetwork(object):
                 # processed_em = tf.layers.flatten(processed_em, name="flattened_em")
 
             with tf.name_scope("loss"):
-                ll = tf.reduce_sum(self.em_pd.log_prob(Embedding), name="log_likelihood")
+                ll = tf.reduce_sum(self.em_pd.log_prob(Embedding), axis=1, name="log_likelihood")
+                # ll = self.em_pd.log_prob(Embedding, name="log_likelihood")
                 discount = tf.placeholder(dtype=tf.float32, shape=[None], name="discounts")
                 discounted_ll = discount * ll
 
                 loss = tf.identity(-tf.reduce_mean(discounted_ll), name="traj_enc_loss")
                 params = tf.trainable_variables()
-                print("TRAINABLE VARS", params)
+                print("TRAINABLE INFERENCENET VARS", params)
 
             with tf.name_scope("training"):
                 grads = tf.gradients(loss, params)

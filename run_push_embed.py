@@ -30,9 +30,9 @@ from policies import MlpEmbedPolicy
 import ppo2embed
 
 SEED = 1234
-TRAJ_SIZE = 150
-TASKS = ["up" , "down", "left", "right"]
-CONTROL_MODE = "position_control"  # "task_space_control"
+TRAJ_SIZE = 40
+TASKS = ["up", "down", "left", "right"]
+CONTROL_MODE = "task_space_control"
 EASY_GRIPPER_INIT = True
 RANDOMIZE_START_POS = False
 
@@ -42,6 +42,7 @@ USE_BETA = True
 
 def unwrap_env(env: VecNormalize, id: int = 0):
     return env.unwrapped.envs[id].env
+
 
 def train(num_timesteps, seed, log_folder):
     ncpu = 1
@@ -58,7 +59,7 @@ def train(num_timesteps, seed, log_folder):
                                                       control_method=CONTROL_MODE,
                                                       easy_gripper_init=EASY_GRIPPER_INIT,
                                                       randomize_start_pos=RANDOMIZE_START_POS))]),
-        ob=False, ret=True
+        ob=False, ret=False
     )
 
     def plot_traj(fig, where, task, batch_tuple_size, batches, colormap):
@@ -73,15 +74,15 @@ def train(num_timesteps, seed, log_folder):
 
         LIMITS = [0, .5, -.2]
 
-        for i, batch in enumerate(batches):
-            obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos, \
-            inference_means, inference_stds = tuple(batch)
-            ax.plot(obs[:, 1], obs[:, 2], color=colormap(i * 1. / len(batches)),
-                    zorder=2, linewidth=.5, zs=LIMITS[0], zdir='x')
-            ax.plot(obs[:, 0], obs[:, 2], color=colormap(i * 1. / len(batches)),
-                    zorder=2, linewidth=.5, zs=LIMITS[1], zdir='y')
-            ax.plot(obs[:, 0], obs[:, 1], color=colormap(i * 1. / len(batches)),
-                    zorder=2, linewidth=.5, zs=LIMITS[2], zdir='z')
+        # for i, batch in enumerate(batches):
+        #     obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos, \
+        #     inference_means, inference_stds = tuple(batch)
+        #     ax.plot(obs[:, 1], obs[:, 2], color=colormap(i * 1. / len(batches)),
+        #             zorder=2, linewidth=.5, zs=LIMITS[0], zdir='x')
+        #     ax.plot(obs[:, 0], obs[:, 2], color=colormap(i * 1. / len(batches)),
+        #             zorder=2, linewidth=.5, zs=LIMITS[1], zdir='y')
+        #     ax.plot(obs[:, 0], obs[:, 1], color=colormap(i * 1. / len(batches)),
+        #             zorder=2, linewidth=.5, zs=LIMITS[2], zdir='z')
 
         ax.set_xlim([0, 1])
         ax.set_ylim([-.5, .5])
@@ -152,23 +153,23 @@ def train(num_timesteps, seed, log_folder):
                     task_space=task_space,
                     latent_space=latent_space,
                     traj_size=TRAJ_SIZE,
-                    nbatches=16,
+                    nbatches=10,
                     lam=0.95,
                     gamma=0.99,
-                    policy_entropy=0.1, #.01,  # 0.1,
-                    embedding_entropy=-0.5,  # -0.01,  # 0.01,
-                    inference_coef=0.001,  # .001,
+                    policy_entropy=0.01,  # .01,  # 0.1,
+                    embedding_entropy=0.01,  # -0.01,  # 0.01,
+                    inference_coef=0.001,  # 0.03,  # .001,
                     inference_opt_epochs=3,  # 3,
                     inference_horizon=3,
                     log_interval=1,
-                    em_hidden_layers=(4,),
-                    pi_hidden_layers=(16, 16),
-                    vf_hidden_layers=(16, 16),
-                    #vf_coef=1e-4,
+                    em_hidden_layers=(2,),
+                    pi_hidden_layers=(4, 4),
+                    vf_hidden_layers=(4, 4),
+                    vf_coef=1,
                     inference_hidden_layers=(16,),
                     render_fn=render_robot,
-                    lr=1e-4,
-                    cliprange=0.15,
+                    lr=5e-2,
+                    cliprange=0.2,
                     seed=seed,
                     total_timesteps=num_timesteps,
                     plot_folder=osp.join(log_folder, "plots"),

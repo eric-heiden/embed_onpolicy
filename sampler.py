@@ -150,7 +150,8 @@ class Sampler(object):
             #     discounts.append(self.gamma)
             if infos["episode"]["d"]:
                 completions = 1
-                break
+                # TODO revert
+                # break
 
         # batch of steps to batch of rollouts
         mb_obs = np.asarray(mb_obs, dtype=self.obs.dtype)
@@ -186,7 +187,8 @@ class Sampler(object):
         mb_advs = np.zeros_like(mb_rewards)
         lastgaelam = 0
 
-        mb_rewards += self.inference_coef * inference_discounted_log_likelihoods.reshape(mb_rewards.shape)
+        # mb_rewards += self.inference_coef * inference_discounted_log_likelihoods.reshape(mb_rewards.shape)
+        mb_rewards += self.inference_coef * inference_log_likelihood
 
         for t in reversed(range(traj_len)):
             if t == traj_len - 1:

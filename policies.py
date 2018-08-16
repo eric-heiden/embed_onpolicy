@@ -69,7 +69,7 @@ class MlpEmbedPolicy(object):
     def __init__(self, sess: tf.Session, ob_space: Box, ac_space: Box, task_space: Box, latent_space: Box,
                  traj_size, reuse=False, name="model", use_beta=False, seed=None,
                  em_hidden_layers=(8,), pi_hidden_layers=(16, 16), vf_hidden_layers=(16, 16),
-                 activation_fn=tf.nn.leaky_relu):
+                 activation_fn=tf.nn.leaky_relu, embedding_actiation_fn=tf.identity):
 
         with tf.variable_scope(name, reuse=reuse):
             # task input
@@ -85,9 +85,9 @@ class MlpEmbedPolicy(object):
             with tf.name_scope("embedding"):
                 layer_in = processed_t
                 for i, units in enumerate(em_hidden_layers):
-                    em_h = tf.tanh(fc(layer_in, 'embed_fc%i' % (i+1), nh=units, init_scale=0.5), name="em_h%i" % (i+1))
+                    em_h = embedding_actiation_fn(fc(layer_in, 'embed_fc%i' % (i+1), nh=units, init_scale=0.5), name="em_h%i" % (i+1))
                     layer_in = em_h
-                em_h = tf.tanh(fc(layer_in, 'embed_fc', nh=latent_space.shape[0], init_scale=0.5), name="em_h")
+                em_h = embedding_actiation_fn(fc(layer_in, 'embed_fc', nh=latent_space.shape[0], init_scale=0.5), name="em_h")
                 em_logstd = tf.get_variable(name='em_logstd', shape=[1, latent_space.shape[0]],
                                             initializer=tf.zeros_initializer(), trainable=True)
                 em_std = tf.exp(em_logstd, name="em_std")
@@ -113,11 +113,14 @@ class MlpEmbedPolicy(object):
                     pi_h = activation_fn(fc(pi_input, 'pi_fc%i' % (i+1), nh=units, init_scale=np.sqrt(2)), name="pi_h%i" % (i+1))
                     pi_input = pi_h
 
+            self.inference_lll = tf.placeholder(dtype=tf.float32, shape=[None], name="inference_lll")
+
             # value function
             with tf.name_scope("vf"):
                 tiled_t = tf.tile(Task, (traj_size, 1), name="tiled_task")[:tf.shape(Observation)[0]]
                 # vf_input = tf.concat((processed_ob, tiled_t), axis=1, name="ob_task")
                 vf_input = tf.concat((self.tiled_em, processed_ob, tiled_t), axis=1, name="em_ob_task")
+                # vf_input = tf.concat((self.tiled_em, processed_ob, tiled_t, self.inference_lll), axis=1, name="em_ob_task_inf")
                 for i, units in enumerate(vf_hidden_layers):
                     vf_h = activation_fn(fc(vf_input, 'vf_fc%i' % (i+1), nh=units, init_scale=np.sqrt(2)), name="vf_h%i" % (i+1))
                     vf_input = vf_h
@@ -141,6 +144,8 @@ class MlpEmbedPolicy(object):
                     self.pd = tf.distributions.Normal(mean, std, allow_nan_stats=False, name="PolicyDist_normal")
 
             with tf.name_scope("action"):
+                # TODO revert
+                # action = self.pd.mean(name="action")
                 action = self.pd.sample(name="action", seed=seed)
                 action_mean = self.pd.mean("action_mean")
                 action_mode = self.pd.mode("action_mode")

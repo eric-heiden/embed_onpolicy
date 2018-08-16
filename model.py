@@ -144,6 +144,11 @@ class Model(object):
                 normalized_grads.append(np.mean(gradients[i], axis=0))
             sess.run([_train], {src_grads: normalized_grads, LR: lr, CLIPRANGE: cliprange})
 
+            grad_means = {name: np.mean(g) for g, name in zip(normalized_grads[:5],
+                                                              ['embed_fc1/w', 'embed_fc1/b', 'embed_fc/w', 'embed_fc/b',
+                                                               'em_logstd'])}
+            print("Embedding grads:", grad_means)
+
             return np.mean(losses, axis=0), computed_latents, advantages
 
         def get_latent(task: int):
