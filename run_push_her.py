@@ -23,6 +23,11 @@ from garage.envs.mujoco.sawyer import PushEnv
 
 from subprocess import CalledProcessError
 
+EASY_GRIPPER_INIT = True
+RANDOMIZE_START_POS = False
+DIRECTION = "left"
+CONTROL_MODE = "position_control"
+
 
 def mpi_average(value):
     if not value:
@@ -95,7 +100,13 @@ def prepare_params(kwargs):
     ddpg_params = dict()
 
     def make_env():
-        return PushEnv(direction="up", for_her=True)
+        return PushEnv(
+            direction=DIRECTION,
+            control_method=CONTROL_MODE,
+            easy_gripper_init=EASY_GRIPPER_INIT,
+            randomize_start_pos=RANDOMIZE_START_POS,
+            for_her=True)
+
     kwargs['make_env'] = make_env
     tmp_env = cached_make_env(kwargs['make_env'])
     assert hasattr(tmp_env, '_max_episode_steps')

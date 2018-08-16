@@ -32,7 +32,7 @@ import ppo2embed
 SEED = 1234
 TRAJ_SIZE = 40
 TASKS = ["up", "down", "left", "right"]
-CONTROL_MODE = "task_space_control"
+CONTROL_MODE = "position_control"
 EASY_GRIPPER_INIT = True
 RANDOMIZE_START_POS = False
 
@@ -183,7 +183,7 @@ def train(num_timesteps, seed, log_folder):
 
 def main():
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-    log_folder = osp.join(osp.dirname(__file__), 'log/push_embed_%i_%s' % (SEED, timestamp))
+    log_folder = osp.join(osp.dirname(__file__), 'log/push_pos_embed_%i_%s' % (SEED, timestamp))
     print("Logging to %s." % log_folder)
     logger.configure(dir=log_folder, format_strs=['stdout', 'log', 'csv'])
     train(num_timesteps=1e6, seed=SEED, log_folder=log_folder)
