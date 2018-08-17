@@ -61,7 +61,9 @@ class Visualizer(object):
 
         additional_width = 0
         if curriculum is not None:
-            additional_width = 5
+            additional_width += 5
+        if self.model.use_beta:
+            additional_width += 8 * nactions
         fig = plt.figure(figsize=(latent_dim * 6 + 8 + nactions * 4 + additional_width, ntasks * 3))
         fig.suptitle(title)
 
@@ -72,6 +74,8 @@ class Visualizer(object):
         value_axes = []
         infer_axes = []
         obs_axes = []
+        alpha_axes = []
+        beta_axes = []
 
         embedding_means, embedding_stds = [], []
         latent_mins = np.zeros(latent_dim)
@@ -91,12 +95,14 @@ class Visualizer(object):
 
             plot_index = 0
 
-            curriculum_plots = 0
+            extra_plots = 0
             if curriculum is not None:
-                curriculum_plots = 1
+                extra_plots += 1
+
+            extra_plots += 2 * nactions
 
             # plot trajectories
-            gs00 = gridspec.GridSpecFromSubplotSpec(1, 3 + latent_dim * 2 + nactions + curriculum_plots, subplot_spec=gs0[task])
+            gs00 = gridspec.GridSpecFromSubplotSpec(1, 3 + latent_dim * 2 + nactions + extra_plots, subplot_spec=gs0[task])
 
             if self.traj_plot_fn is not None:
                 self.traj_plot_fn(fig, gs00[plot_index], task, batch_tuple_size, task_data[task], colormap)
@@ -105,7 +111,7 @@ class Visualizer(object):
             embedding_mean, embedding_std = embedding_means[task], embedding_stds[task]
 
             # plot actions
-            for da in range(self.env.action_space.shape[0]):
+            for da in range(nactions):
                 action_ax = plt.Subplot(fig, gs00[plot_index])
                 action_ax.set_title("action[%i]" % da)
                 action_ax.grid()
@@ -119,12 +125,85 @@ class Visualizer(object):
                 for i, batch in enumerate(task_data[task]):
                     # bs = tuple([np.array([batch[i][k] for i in range(len(batch))]) for k in range(batch_tuple_size)])
                     obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos, \
-                        inference_means, inference_stds = tuple(batch)
+                        inference_means, inference_stds, extras = tuple(batch)
                     action_ax.plot(actions[:, da], '.-', zorder=2, color=colormap(i * 1. / nsamples))
 
                 action_axes.append(action_ax)
                 fig.add_subplot(action_ax)
                 plot_index += 1
+
+            if self.model.use_beta:
+                for da in range(nactions):
+                    alpha_ax = plt.Subplot(fig, gs00[plot_index])
+                    alpha_ax.set_title("alpha[%i]" % da)
+                    alpha_ax.grid()
+                    if task > 0:
+                        alpha_ax.get_shared_x_axes().join(alpha_ax, alpha_axes[da])
+                        alpha_ax.get_shared_y_axes().join(alpha_ax, alpha_axes[da])
+
+                    for i, batch in enumerate(task_data[task]):
+                        # bs = tuple([np.array([batch[i][k] for i in range(len(batch))]) for k in range(batch_tuple_size)])
+                        obs, tasks, returns, masks, alphas, values, neglogpacs, latents, epinfos, \
+                        inference_means, inference_stds, extras = tuple(batch)
+                        alpha_ax.plot(extras["alphas"][:, da], '.-', zorder=2, color=colormap(i * 1. / nsamples))
+
+                    alpha_axes.append(alpha_ax)
+                    fig.add_subplot(alpha_ax)
+                    plot_index += 1
+
+                for da in range(nactions):
+                    beta_ax = plt.Subplot(fig, gs00[plot_index])
+                    beta_ax.set_title("beta[%i]" % da)
+                    beta_ax.grid()
+                    if task > 0:
+                        beta_ax.get_shared_x_axes().join(beta_ax, beta_axes[da])
+                        beta_ax.get_shared_y_axes().join(beta_ax, beta_axes[da])
+
+                    for i, batch in enumerate(task_data[task]):
+                        # bs = tuple([np.array([batch[i][k] for i in range(len(batch))]) for k in range(batch_tuple_size)])
+                        obs, tasks, returns, masks, betas, values, neglogpacs, latents, epinfos, \
+                        inference_means, inference_stds, extras = tuple(batch)
+                        beta_ax.plot(extras["betas"][:, da], '.-', zorder=2, color=colormap(i * 1. / nsamples))
+
+                    beta_axes.append(beta_ax)
+                    fig.add_subplot(beta_ax)
+                    plot_index += 1
+            else:
+                for da in range(nactions):
+                    alpha_ax = plt.Subplot(fig, gs00[plot_index])
+                    alpha_ax.set_title("mean[%i]" % da)
+                    alpha_ax.grid()
+                    if task > 0:
+                        alpha_ax.get_shared_x_axes().join(alpha_ax, alpha_axes[da])
+                        alpha_ax.get_shared_y_axes().join(alpha_ax, alpha_axes[da])
+
+                    for i, batch in enumerate(task_data[task]):
+                        # bs = tuple([np.array([batch[i][k] for i in range(len(batch))]) for k in range(batch_tuple_size)])
+                        obs, tasks, returns, masks, alphas, values, neglogpacs, latents, epinfos, \
+                        inference_means, inference_stds, extras = tuple(batch)
+                        alpha_ax.plot(extras["means"][:, da], '.-', zorder=2, color=colormap(i * 1. / nsamples))
+
+                    alpha_axes.append(alpha_ax)
+                    fig.add_subplot(alpha_ax)
+                    plot_index += 1
+
+                for da in range(nactions):
+                    beta_ax = plt.Subplot(fig, gs00[plot_index])
+                    beta_ax.set_title("std[%i]" % da)
+                    beta_ax.grid()
+                    if task > 0:
+                        beta_ax.get_shared_x_axes().join(beta_ax, beta_axes[da])
+                        beta_ax.get_shared_y_axes().join(beta_ax, beta_axes[da])
+
+                    for i, batch in enumerate(task_data[task]):
+                        # bs = tuple([np.array([batch[i][k] for i in range(len(batch))]) for k in range(batch_tuple_size)])
+                        obs, tasks, returns, masks, betas, values, neglogpacs, latents, epinfos, \
+                        inference_means, inference_stds, extras = tuple(batch)
+                        beta_ax.plot(extras["stds"][:, da], '.-', zorder=2, color=colormap(i * 1. / nsamples))
+
+                    beta_axes.append(beta_ax)
+                    fig.add_subplot(beta_ax)
+                    plot_index += 1
 
             # plot observations
             obs_ax = plt.Subplot(fig, gs00[plot_index])
@@ -139,7 +218,7 @@ class Visualizer(object):
                 for i, batch in enumerate(task_data[task]):
                     # bs = tuple([np.array([batch[i][k] for i in range(len(batch))]) for k in range(batch_tuple_size)])
                     obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos, \
-                        inference_means, inference_stds = tuple(batch)
+                        inference_means, inference_stds, extras = tuple(batch)
                     if i == 0:
                         obs_ax.plot(obs[:, do], '.-', zorder=2, color=colormap(do * 1. / obs_dim), label="obs[%i]" % do)
                     else:
@@ -162,7 +241,7 @@ class Visualizer(object):
             for i, batch in enumerate(task_data[task]):
                 # bs = tuple([np.array([batch[i][k] for i in range(len(batch))]) for k in range(batch_tuple_size)])
                 obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos, \
-                    inference_means, inference_stds = tuple(batch)
+                    inference_means, inference_stds, extras = tuple(batch)
                 xs = np.arange(0, len(obs))
                 value_ax.fill_between(xs,
                                       returns,
@@ -219,7 +298,7 @@ class Visualizer(object):
                 for i, batch in enumerate(task_data[task]):
                     # bs = tuple([np.array([batch[i][k] for i in range(len(batch))]) for k in range(batch_tuple_size)])
                     obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos, \
-                        inference_means, inference_stds = tuple(batch)
+                        inference_means, inference_stds, extras = tuple(batch)
                     latent_ax.axvline(latents[0, li], zorder=2, linewidth=2, color=colormap(i * 1. / nsamples))
 
                 latent_axes.append(latent_ax)
@@ -250,7 +329,7 @@ class Visualizer(object):
                 for i, batch in enumerate(task_data[task]):
                     # bs = tuple([np.array([batch[i][k] for i in range(len(batch))]) for k in range(batch_tuple_size)])
                     obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos, \
-                        inference_means, inference_stds = tuple(batch)
+                        inference_means, inference_stds, extras = tuple(batch)
                     if len(inference_means.shape) < 2:
                         break
                     mus = inference_means[:, li]

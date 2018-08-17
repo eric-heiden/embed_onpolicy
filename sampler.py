@@ -77,13 +77,25 @@ class Sampler(object):
         c_rewards = []
         c_infos = []
 
+        c_pi_param1 = []
+        c_pi_param2 = []
+
         traj_len = 0
 
         for step in range(self.traj_size):
             traj_len += 1
-            actions, values, mb_states, neglogpacs = self.model.step(latents, self.obs, onehots, self.states,
+            if self.model.use_beta:
+                alphas, betas, actions, values, mb_states, neglogpacs = self.model.step(latents, self.obs, onehots, self.states,
+                                                                         self.dones,
+                                                                         action_type="sample") # TODO revert "("mean" if render else "sample"))
+                c_pi_param1.append(alphas[0])
+                c_pi_param2.append(betas[0])
+            else:
+                means, stds, actions, values, mb_states, neglogpacs = self.model.step(latents, self.obs, onehots, self.states,
                                                                      self.dones,
-                                                                     action_type=("mean" if render else "sample"))
+                                                                     action_type="sample") # TODO revert "("mean" if render else "sample"))
+                c_pi_param1.append(means[0])
+                c_pi_param2.append(stds[0])
 
             # actions, values, mb_states, neglogpacs = self.model.step(latents, np.zeros_like(self.obs), onehots, self.states,
             #                                                          self.dones)
@@ -188,7 +200,7 @@ class Sampler(object):
         lastgaelam = 0
 
         # mb_rewards += self.inference_coef * inference_discounted_log_likelihoods.reshape(mb_rewards.shape)
-        mb_rewards += self.inference_coef * inference_log_likelihood
+        mb_rewards += self.inference_coef * inference_discounted_log_likelihoods
 
         for t in reversed(range(traj_len)):
             if t == traj_len - 1:
@@ -211,11 +223,19 @@ class Sampler(object):
         inference_means = np.array(inference_means)
         inference_stds = np.array(inference_stds)
 
+        extras = {}
+        if self.model.use_beta:
+            extras["alphas"] = np.array(c_pi_param1)
+            extras["betas"] = np.array(c_pi_param2)
+        else:
+            extras["means"] = np.array(c_pi_param1)
+            extras["stds"] = np.array(c_pi_param2)
+
         if render:
             return mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, mb_latents, \
                    mb_tasks, mb_states, epinfos, completions, inference_loss, inference_log_likelihoods, \
-                   inference_discounted_log_likelihoods, inference_means, inference_stds, video
+                   inference_discounted_log_likelihoods, inference_means, inference_stds, video, extras
 
         return mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, mb_latents, \
                mb_tasks, mb_states, epinfos, completions, inference_loss, inference_log_likelihoods, \
-               inference_discounted_log_likelihoods, inference_means, inference_stds
+               inference_discounted_log_likelihoods, inference_means, inference_stds, extras

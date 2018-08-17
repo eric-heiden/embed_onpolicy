@@ -25,7 +25,7 @@ from subprocess import CalledProcessError
 
 EASY_GRIPPER_INIT = True
 RANDOMIZE_START_POS = False
-DIRECTION = "left"
+DIRECTION = "up"
 CONTROL_MODE = "position_control"
 
 

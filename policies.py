@@ -129,19 +129,19 @@ class MlpEmbedPolicy(object):
             if use_beta:
                 # use Beta distribution
                 with tf.name_scope("PolicyDist_beta"):
-                    alpha = tf.nn.softplus(fc(pi_input, 'pi_alpha1', ac_space.shape[0], init_scale=1., init_bias=0.), name='pi_alpha')
-                    beta = tf.nn.softplus(fc(pi_input, 'pi_beta1', ac_space.shape[0], init_scale=1., init_bias=0.), name='pi_beta')
-                    clipped_alpha = tf.clip_by_value(alpha, clip_value_min=EPS, clip_value_max=-np.log(EPS))
-                    clipped_beta = tf.clip_by_value(beta, clip_value_min=EPS, clip_value_max=-np.log(EPS))
+                    self.alpha = tf.nn.softplus(fc(pi_input, 'pi_alpha1', ac_space.shape[0], init_scale=1., init_bias=0.), name='pi_alpha')
+                    self.beta = tf.nn.softplus(fc(pi_input, 'pi_beta1', ac_space.shape[0], init_scale=1., init_bias=0.), name='pi_beta')
+                    clipped_alpha = tf.clip_by_value(self.alpha, clip_value_min=EPS, clip_value_max=-np.log(EPS))
+                    clipped_beta = tf.clip_by_value(self.beta, clip_value_min=EPS, clip_value_max=-np.log(EPS))
                     self.pd = tf.distributions.Beta(clipped_alpha, clipped_beta, validate_args=False, name="PolicyDist_beta")
             else:
                 # use Gaussian distribution
                 with tf.name_scope("PolicyDist_normal"):
-                    mean = fc(pi_input, 'pi', ac_space.shape[0], init_scale=0.01, init_bias=0.)
+                    self.mean = fc(pi_input, 'pi', ac_space.shape[0], init_scale=0.01, init_bias=0.)
                     logstd = tf.get_variable(name='pi_logstd', shape=[1, ac_space.shape[0]],
-                                             initializer=tf.zeros_initializer(), trainable=True)
-                    std = tf.exp(logstd)
-                    self.pd = tf.distributions.Normal(mean, std, allow_nan_stats=False, name="PolicyDist_normal")
+                                             initializer=tf.constant_initializer(0.1), trainable=True)
+                    self.std = tf.exp(logstd)
+                    self.pd = tf.distributions.Normal(self.mean, self.std, allow_nan_stats=False, name="PolicyDist_normal")
 
             with tf.name_scope("action"):
                 # TODO revert
@@ -169,16 +169,27 @@ class MlpEmbedPolicy(object):
             self.initial_state = None
 
         def step(latent, ob, task, *_args, action_type="sample", **_kwargs):
-            # XXX task is only fed for the value function!
-            if action_type == "mean":
-                a, v, neglogp = sess.run([action_mean, vf, neglogp0], {Observation: ob, Embedding: latent, Task: task})
-            elif action_type == "mode":
-                a, v, neglogp = sess.run([action_mode, vf, neglogp0], {Observation: ob, Embedding: latent, Task: task})
-            else:
-                a, v, neglogp = sess.run([action, vf, neglogp0], {Observation: ob, Embedding: latent, Task: task})
+            if self.use_beta:
+                # XXX task is only fed for the value function!
+                if action_type == "mean":
+                    alpha, beta, a, v, neglogp = sess.run([self.alpha, self.beta, action_mean, vf, neglogp0], {Observation: ob, Embedding: latent, Task: task})
+                elif action_type == "mode":
+                    alpha, beta, a, v, neglogp = sess.run([self.alpha, self.beta, action_mode, vf, neglogp0], {Observation: ob, Embedding: latent, Task: task})
+                else:
+                    alpha, beta, a, v, neglogp = sess.run([self.alpha, self.beta, action, vf, neglogp0], {Observation: ob, Embedding: latent, Task: task})
 
-            # print("Observation len: ", l, " true:", np.shape(ob))
-            return a, v, self.initial_state, neglogp
+                return alpha, beta, a, v, self.initial_state, neglogp
+            else:
+                # XXX task is only fed for the value function!
+                if action_type == "mean":
+                    mean, std, a, v, neglogp = sess.run([self.mean, self.std, action_mean, vf, neglogp0], {Observation: ob, Embedding: latent, Task: task})
+                elif action_type == "mode":
+                    mean, std, a, v, neglogp = sess.run([self.mean, self.std, action_mode, vf, neglogp0], {Observation: ob, Embedding: latent, Task: task})
+                else:
+                    mean, std, a, v, neglogp = sess.run([self.mean, self.std, action, vf, neglogp0], {Observation: ob, Embedding: latent, Task: task})
+
+                # print("Observation len: ", l, " true:", np.shape(ob))
+                return mean, std, a, v, self.initial_state, neglogp
 
         def step_from_task(task, ob, *_args, **_kwargs):
             a, v, neglogp = sess.run([action, vf, neglogp0], {Observation: ob, Task: task})

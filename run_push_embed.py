@@ -30,14 +30,15 @@ from policies import MlpEmbedPolicy
 import ppo2embed
 
 SEED = 1234
-TRAJ_SIZE = 40
-TASKS = ["up", "down", "left", "right"]
+TRAJ_SIZE = 250
+TASKS = ["up"]  # , "down", "left", "right"]
 CONTROL_MODE = "position_control"
-EASY_GRIPPER_INIT = True
+EASY_GRIPPER_INIT = False
 RANDOMIZE_START_POS = False
 
 # use Beta distribution for policy, Gaussian otherwise
-USE_BETA = True
+USE_BETA = False
+ACTION_SCALE = 0.1 if USE_BETA else 50.
 
 
 def unwrap_env(env: VecNormalize, id: int = 0):
@@ -58,7 +59,8 @@ def train(num_timesteps, seed, log_folder):
         DummyVecEnv([lambda: SawyerEnvWrapper(PushEnv(direction=TASKS[task],
                                                       control_method=CONTROL_MODE,
                                                       easy_gripper_init=EASY_GRIPPER_INIT,
-                                                      randomize_start_pos=RANDOMIZE_START_POS))]),
+                                                      randomize_start_pos=RANDOMIZE_START_POS,
+                                                      action_scale=ACTION_SCALE))]),
         ob=False, ret=False
     )
 
@@ -111,27 +113,25 @@ def train(num_timesteps, seed, log_folder):
                 for j, r in enumerate(rewards):
                     rew_x = int(j * width_factor)
                     if r < 0:
+                        rew_y = int(-r / max_reward * lower_part) if -r <= max_reward else lower_part
                         color = blue if infos[j]["episode"]["grasped"] else red
-                        img_center[-1:, p_rew_x:rew_x] = color
-                        img_center[-1:, p_rew_x:rew_x] = color
                     else:
                         rew_y = int(r / max_reward * lower_part) if r <= max_reward else lower_part
                         color = blue if infos[j]["episode"]["grasped"] else orange
-                        img_center[-rew_y - 1:, p_rew_x:rew_x] = color
-                        img_center[-rew_y - 1:, p_rew_x:rew_x] = color
+                    img_center[-rew_y - 1:, p_rew_x:rew_x] = color
+                    img_center[-rew_y - 1:, p_rew_x:rew_x] = color
                     p_rew_x = rew_x
             else:
                 for j, r in enumerate(rewards):
                     rew_x = int(j * width_factor)
                     if r < 0:
+                        rew_y = int(-r / max_reward * lower_part) if -r <= max_reward else lower_part
                         color = blue if infos[j]["episode"]["grasped"] else red
-                        img_center[-1:, rew_x] = color
-                        img_center[-1:, rew_x] = color
                     else:
                         rew_y = int(r / max_reward * lower_part) if r <= max_reward else lower_part
                         color = blue if infos[j]["episode"]["grasped"] else orange
-                        img_center[-rew_y - 1:, rew_x] = color
-                        img_center[-rew_y - 1:, rew_x] = color
+                    img_center[-rew_y - 1:, rew_x] = color
+                    img_center[-rew_y - 1:, rew_x] = color
 
             env.render_camera = "camera_front"
             img_right = env.render(mode='rgb_array')
@@ -156,19 +156,19 @@ def train(num_timesteps, seed, log_folder):
                     nbatches=10,
                     lam=0.95,
                     gamma=0.99,
-                    policy_entropy=0.01,  # .01,  # 0.1,
-                    embedding_entropy=0.01,  # -0.01,  # 0.01,
-                    inference_coef=0.001,  # 0.03,  # .001,
+                    policy_entropy=0.1,  # .01,  # 0.1,
+                    embedding_entropy=-0.01,  # -0.01,  # 0.01,
+                    inference_coef=0, #.001,  # 0.03,  # .001,
                     inference_opt_epochs=3,  # 3,
                     inference_horizon=3,
                     log_interval=1,
                     em_hidden_layers=(2,),
-                    pi_hidden_layers=(4, 4),
-                    vf_hidden_layers=(4, 4),
+                    pi_hidden_layers=(16, 16),
+                    vf_hidden_layers=(16, 16),
                     vf_coef=1,
                     inference_hidden_layers=(16,),
                     render_fn=render_robot,
-                    lr=5e-2,
+                    lr=5e-3,
                     cliprange=0.2,
                     seed=seed,
                     total_timesteps=num_timesteps,

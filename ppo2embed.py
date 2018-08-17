@@ -149,16 +149,16 @@ def learn(*, policy, env_fn, unwrap_env, task_space, latent_space, traj_size,
                     rf = render_fn(task, update)
                     obs, returns, masks, actions, values, neglogpacs, latents, tasks, states, epinfos, \
                     completions, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods, \
-                    inference_means, inference_stds, sampled_video = sampler.run(env, task, render=rf)
+                    inference_means, inference_stds, sampled_video, extras = sampler.run(env, task, render=rf)
                     video += sampled_video
                 else:
                     obs, returns, masks, actions, values, neglogpacs, latents, tasks, states, epinfos, \
                     completions, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods, \
-                    inference_means, inference_stds = sampler.run(env, task)
+                    inference_means, inference_stds, extras = sampler.run(env, task)
                 epinfobuf.extend(epinfos)
                 training_batches.append((obs, tasks, returns, masks, actions, values, neglogpacs, states))
                 visualization_batches.append((obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos,
-                                              inference_means, inference_stds))
+                                              inference_means, inference_stds, extras))
                 neglogpacs_total.append(neglogpacs)
                 act_latents.append(latents)
                 inference_losses.append(inference_loss)
