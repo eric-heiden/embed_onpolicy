@@ -1,6 +1,7 @@
 import sys
 import os.path as osp
 import numpy as np
+from gym.envs.robotics import rotations
 
 sys.path.insert(0, osp.join(osp.dirname(__file__), 'baselines'))
 # sys.path.insert(0, '/home/eric/.deep-rl-docker/garage_rjzp_temp')
@@ -37,3 +38,5 @@ for i in range(200):
         env.step(action)
         # if s < 5:
         #     print(direction, '\t', env.joint_positions)
+        grip_rot = rotations.mat2euler(env.sim.data.get_site_xmat('grip'))
+        print("gripper orientation:", grip_rot)

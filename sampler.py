@@ -20,7 +20,7 @@ def sf01(arr):
 class Sampler(object):
 
     def __init__(self, *, env: DummyVecEnv, unwrap_env: Callable, model: Model, gamma, lam, traj_size: int = 20,
-                 inference_opt_epochs: int = 4, inference_coef: float = 0.1):
+                 inference_opt_epochs: int = 4, inference_coef: float = 0.1, use_embedding: bool = True):
         self.env = env
         self.unwrap_env = unwrap_env
         self.model = model
@@ -38,6 +38,7 @@ class Sampler(object):
         self.traj_size = traj_size
         self.inference_opt_epochs = inference_opt_epochs
         self.inference_coef = inference_coef
+        self.use_embedding = use_embedding
 
     def run(self, env: DummyVecEnv, task: int, render=None):
         mb_obs, mb_rewards, mb_actions, mb_latents, mb_tasks, mb_values, mb_dones, mb_neglogpacs = \
@@ -64,7 +65,10 @@ class Sampler(object):
 
         epinfos = []
         completions = 0
-        traj_window = deque(maxlen=self.model.inference_model.horizon)
+        if self.use_embedding:
+            traj_window = deque(maxlen=self.model.inference_model.horizon)
+        else:
+            traj_window = None
         traj_windows = []
         discounts = []
 
@@ -80,22 +84,40 @@ class Sampler(object):
         c_pi_param1 = []
         c_pi_param2 = []
 
+        inference_discounted_log_likelihoods = 0
+        inference_means = []
+        inference_stds = []
+
         traj_len = 0
 
         for step in range(self.traj_size):
             traj_len += 1
-            if self.model.use_beta:
-                alphas, betas, actions, values, mb_states, neglogpacs = self.model.step(latents, self.obs, onehots, self.states,
+            if self.use_embedding:
+                if self.model.use_beta:
+                    alphas, betas, actions, values, mb_states, neglogpacs = self.model.step(latents, self.obs, onehots, self.states,
+                                                                             self.dones,
+                                                                             action_type="sample") # TODO revert "("mean" if render else "sample"))
+                    c_pi_param1.append(alphas[0])
+                    c_pi_param2.append(betas[0])
+                else:
+                    means, stds, actions, values, mb_states, neglogpacs = self.model.step(latents, self.obs, onehots, self.states,
                                                                          self.dones,
                                                                          action_type="sample") # TODO revert "("mean" if render else "sample"))
-                c_pi_param1.append(alphas[0])
-                c_pi_param2.append(betas[0])
+                    c_pi_param1.append(means[0])
+                    c_pi_param2.append(stds[0])
             else:
-                means, stds, actions, values, mb_states, neglogpacs = self.model.step(latents, self.obs, onehots, self.states,
-                                                                     self.dones,
-                                                                     action_type="sample") # TODO revert "("mean" if render else "sample"))
-                c_pi_param1.append(means[0])
-                c_pi_param2.append(stds[0])
+                if self.model.use_beta:
+                    alphas, betas, actions, values, mb_states, neglogpacs = self.model.step(None, self.obs, onehots, self.states,
+                                                                             self.dones,
+                                                                             action_type="sample") # TODO revert "("mean" if render else "sample"))
+                    c_pi_param1.append(alphas[0])
+                    c_pi_param2.append(betas[0])
+                else:
+                    means, stds, actions, values, mb_states, neglogpacs = self.model.step(None, self.obs, onehots, self.states,
+                                                                         self.dones,
+                                                                         action_type="sample") # TODO revert "("mean" if render else "sample"))
+                    c_pi_param1.append(means[0])
+                    c_pi_param2.append(stds[0])
 
             # actions, values, mb_states, neglogpacs = self.model.step(latents, np.zeros_like(self.obs), onehots, self.states,
             #                                                          self.dones)
@@ -145,15 +167,17 @@ class Sampler(object):
             # self.latents = [self.model.get_latent(t) for t in self.tasks]
 
             if step == 0:
-                # fill horizon buffer with step 0 copies of trajectory
-                for _ in range(self.model.inference_model.horizon):
-                    traj_window.append(np.concatenate((self.obs.flatten(), actions.flatten())))
+                if self.use_embedding:
+                    # fill horizon buffer with step 0 copies of trajectory
+                    for _ in range(self.model.inference_model.horizon):
+                        traj_window.append(np.concatenate((self.obs.flatten(), actions.flatten())))
                 discounts.append(self.gamma)
             else:
                 discounts.append(discounts[-1] * self.gamma)
 
-            traj_window.append(np.concatenate((self.obs.flatten(), actions.flatten())))
-            traj_windows.append(np.array(traj_window).flatten())
+            if self.use_embedding:
+                traj_window.append(np.concatenate((self.obs.flatten(), actions.flatten())))
+                traj_windows.append(np.array(traj_window).flatten())
 
             # if any(self.dones) and step < self.traj_size-1:
             #     self.obs[:] = self.env.reset()
@@ -178,29 +202,31 @@ class Sampler(object):
         traj_windows = np.array(traj_windows)
         discounts = np.array(discounts)
 
-        inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods = 0, [], []
-        inference_means, inference_stds = [], []
-        # train and evaluate inference network
-        for epoch in range(self.inference_opt_epochs):
-            idxs = np.arange(traj_len)
-            # if epoch < self.inference_opt_epochs - 1:
-            #     np.random.shuffle(idxs)
-            # TODO shuffle the input for a better training outcome? Is this correct?!
-            inference_lll = self.model.inference_model.train(traj_windows[idxs], discounts[idxs], mb_latents[idxs])
-            inference_loss, inference_log_likelihood, inference_discounted_log_likelihoods = tuple(inference_lll)
-            inference_log_likelihoods.append(inference_log_likelihood)
+        if self.use_embedding:
+            inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods = 0, [], []
+            inference_means, inference_stds = [], []
+            # train and evaluate inference network
+            for epoch in range(self.inference_opt_epochs):
+                idxs = np.arange(traj_len)
+                # if epoch < self.inference_opt_epochs - 1:
+                #     np.random.shuffle(idxs)
+                # TODO shuffle the input for a better training outcome? Is this correct?!
+                inference_lll = self.model.inference_model.train(traj_windows[idxs], discounts[idxs], mb_latents[idxs])
+                inference_loss, inference_log_likelihood, inference_discounted_log_likelihoods = tuple(inference_lll)
+                inference_log_likelihoods.append(inference_log_likelihood)
 
-            inference_params = self.model.inference_model.embedding_params(traj_windows[idxs])
-            inference_means = inference_params[0]
-            inference_stds = inference_params[1]
+                inference_params = self.model.inference_model.embedding_params(traj_windows[idxs])
+                inference_means = inference_params[0]
+                inference_stds = inference_params[1]
 
         # discount/bootstrap off value fn
         # mb_returns = np.zeros_like(mb_rewards)
         mb_advs = np.zeros_like(mb_rewards)
         lastgaelam = 0
 
-        # mb_rewards += self.inference_coef * inference_discounted_log_likelihoods.reshape(mb_rewards.shape)
-        mb_rewards += self.inference_coef * inference_discounted_log_likelihoods
+        if self.use_embedding:
+            # mb_rewards += self.inference_coef * inference_discounted_log_likelihoods.reshape(mb_rewards.shape)
+            mb_rewards += self.inference_coef * inference_discounted_log_likelihoods
 
         for t in reversed(range(traj_len)):
             if t == traj_len - 1:
@@ -220,9 +246,6 @@ class Sampler(object):
 
         mb_returns = mb_advs + mb_values
 
-        inference_means = np.array(inference_means)
-        inference_stds = np.array(inference_stds)
-
         extras = {}
         if self.model.use_beta:
             extras["alphas"] = np.array(c_pi_param1)
@@ -230,12 +253,15 @@ class Sampler(object):
         else:
             extras["means"] = np.array(c_pi_param1)
             extras["stds"] = np.array(c_pi_param2)
+        if self.use_embedding:
+            extras["inference_means"] = np.array(inference_means)
+            extras["inference_stds"] = np.array(inference_stds)
 
         if render:
             return mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, mb_latents, \
-                   mb_tasks, mb_states, epinfos, completions, inference_loss, inference_log_likelihoods, \
+                   mb_tasks, mb_states, epinfos, completions, \
                    inference_discounted_log_likelihoods, inference_means, inference_stds, video, extras
 
         return mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, mb_latents, \
-               mb_tasks, mb_states, epinfos, completions, inference_loss, inference_log_likelihoods, \
+               mb_tasks, mb_states, epinfos, completions, \
                inference_discounted_log_likelihoods, inference_means, inference_stds, extras

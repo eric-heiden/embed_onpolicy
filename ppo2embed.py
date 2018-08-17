@@ -39,6 +39,7 @@ def learn(*, policy, env_fn, unwrap_env, task_space, latent_space, traj_size,
           save_interval=50, load_path=None, plot_interval=50, plot_event_interval=200,
           plot_folder=None, traj_plot_fn=None, log_folder=None,
           render_interval=-1, render_fn=None, render_fps=20, curriculum_fn=BasicCurriculum,
+          use_embedding=True,
           **kwargs):
     if isinstance(lr, float):
         lr = constfn(lr)
@@ -69,6 +70,7 @@ def learn(*, policy, env_fn, unwrap_env, task_space, latent_space, traj_size,
                                inference_horizon=inference_horizon,
                                vf_coef=vf_coef,
                                max_grad_norm=max_grad_norm, seed=seed,
+                               use_embedding=use_embedding,
                                **kwargs)
     if save_interval and logger.get_dir():
         import cloudpickle
@@ -95,7 +97,8 @@ def learn(*, policy, env_fn, unwrap_env, task_space, latent_space, traj_size,
                 "total_timesteps": total_timesteps,
                 "cliprange": cliprange,
                 "lr": lr,
-                "plot_folder": plot_folder
+                "plot_folder": plot_folder,
+                "use_embedding": use_embedding
             }))
     model = make_model()
     if load_path is not None:
@@ -104,11 +107,12 @@ def learn(*, policy, env_fn, unwrap_env, task_space, latent_space, traj_size,
     sampler = Sampler(env=env, unwrap_env=unwrap_env, model=model, traj_size=traj_size,
                       inference_opt_epochs=inference_opt_epochs,
                       inference_coef=inference_coef,
-                      gamma=gamma, lam=lam)
+                      gamma=gamma, lam=lam,
+                      use_embedding=use_embedding)
 
     curriculum = curriculum_fn(env_fn, unwrap_env=unwrap_env, batches=nbatches, tasks=ntasks)
 
-    visualizer = Visualizer(model, env, unwrap_env, plot_folder, traj_plot_fn)
+    visualizer = Visualizer(model, env, unwrap_env, plot_folder, traj_plot_fn, use_embedding=use_embedding)
 
     if render_fn is not None and render_interval > 0:
         env.render()
@@ -149,16 +153,15 @@ def learn(*, policy, env_fn, unwrap_env, task_space, latent_space, traj_size,
                     rf = render_fn(task, update)
                     obs, returns, masks, actions, values, neglogpacs, latents, tasks, states, epinfos, \
                     completions, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods, \
-                    inference_means, inference_stds, sampled_video, extras = sampler.run(env, task, render=rf)
+                    sampled_video, extras = sampler.run(env, task, render=rf)
                     video += sampled_video
                 else:
                     obs, returns, masks, actions, values, neglogpacs, latents, tasks, states, epinfos, \
                     completions, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods, \
-                    inference_means, inference_stds, extras = sampler.run(env, task)
+                    extras = sampler.run(env, task)
                 epinfobuf.extend(epinfos)
                 training_batches.append((obs, tasks, returns, masks, actions, values, neglogpacs, states))
-                visualization_batches.append((obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos,
-                                              inference_means, inference_stds, extras))
+                visualization_batches.append((obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos, extras))
                 neglogpacs_total.append(neglogpacs)
                 act_latents.append(latents)
                 inference_losses.append(inference_loss)

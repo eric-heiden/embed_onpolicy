@@ -9,7 +9,8 @@ from policies import MlpEmbedPolicy
 class Model(object):
     def __init__(self, *, policy, ob_space, ac_space, task_space, latent_space, traj_size, policy_entropy, vf_coef,
                  max_grad_norm, embedding_entropy=0., inference_horizon=5, seed=None, em_hidden_layers=(8,),
-                 pi_hidden_layers=(16, 16), vf_hidden_layers=(16, 16), inference_hidden_layers=(16,), **_kwargs):
+                 pi_hidden_layers=(16, 16), vf_hidden_layers=(16, 16), inference_hidden_layers=(16,),
+                 use_embedding=True, **_kwargs):
 
         self.traj_size = traj_size
         self.policy_entropy = policy_entropy
@@ -28,19 +29,19 @@ class Model(object):
         }
 
         sess = tf.get_default_session()
-        inference_model = InferenceNetwork(sess, ob_space, ac_space, latent_space,
-                                           horizon=inference_horizon, hidden_layers=inference_hidden_layers)
         with tf.variable_scope("PPO"):
             act_model = policy(sess, ob_space, ac_space, task_space, latent_space, traj_size=1,
                                reuse=False, seed=seed, name="model",
                                em_hidden_layers=em_hidden_layers,
                                pi_hidden_layers=pi_hidden_layers,
-                               vf_hidden_layers=vf_hidden_layers)  # type: MlpEmbedPolicy
+                               vf_hidden_layers=vf_hidden_layers,
+                               use_embedding=use_embedding)  # type: MlpEmbedPolicy
             train_model = policy(sess, ob_space, ac_space, task_space, latent_space, traj_size=traj_size,
                                  reuse=True, seed=seed, name="model",
                                  em_hidden_layers=em_hidden_layers,
                                  pi_hidden_layers=pi_hidden_layers,
-                                 vf_hidden_layers=vf_hidden_layers)  # type: MlpEmbedPolicy
+                                 vf_hidden_layers=vf_hidden_layers,
+                                 use_embedding=use_embedding)  # type: MlpEmbedPolicy
 
             A = tf.placeholder(dtype=tf.float32, shape=train_model.pd.batch_shape, name="actions")
             # A = train_model.pd.sample(name="A")
@@ -74,10 +75,14 @@ class Model(object):
                 clipfrac = tf.reduce_mean(tf.to_float(tf.greater(tf.abs(ratio - 1.0), CLIPRANGE)), name="clip_frac")
                 loss = tf.identity(pg_loss + vf_loss * vf_coef, name="policy_loss")
 
-                final_loss = tf.identity(loss
-                                         - policy_entropy * entropy
-                                         - embedding_entropy * train_model.embedding_entropy,
-                                         name="final_loss")
+                if use_embedding:
+                    final_loss = tf.identity(loss
+                                             - policy_entropy * entropy
+                                             - embedding_entropy * train_model.embedding_entropy,
+                                             name="final_loss")
+                else:
+                    final_loss = tf.identity(loss - policy_entropy * entropy,
+                                             name="final_loss")
 
             with tf.variable_scope('model', reuse=True):
                 params = tf.trainable_variables(scope="PPO")
@@ -122,11 +127,17 @@ class Model(object):
                     td_map[train_model.S] = states
                     td_map[train_model.M] = masks
 
-                result = sess.run(
-                    [pg_loss, vf_loss, approxkl, clipfrac, entropy, train_model.embedding_entropy, final_loss,
-                     train_model.tiled_em, src_grads],
-                    td_map
-                )
+                if use_embedding:
+                    result = sess.run(
+                        [pg_loss, vf_loss, approxkl, clipfrac, entropy, train_model.embedding_entropy, final_loss,
+                         train_model.tiled_em, src_grads],
+                        td_map
+                    )
+                else:
+                    result = sess.run(
+                        [pg_loss, vf_loss, approxkl, clipfrac, entropy, final_loss, src_grads],
+                        td_map
+                    )
 
                 # print("Observation len: ", result[-3], " true:", np.shape(obs))
 
@@ -144,21 +155,28 @@ class Model(object):
                 normalized_grads.append(np.mean(gradients[i], axis=0))
             sess.run([_train], {src_grads: normalized_grads, LR: lr, CLIPRANGE: cliprange})
 
-            grad_means = {name: np.mean(g) for g, name in zip(normalized_grads[:5],
-                                                              ['embed_fc1/w', 'embed_fc1/b', 'embed_fc/w', 'embed_fc/b',
-                                                               'em_logstd'])}
-            print("Embedding grads:", grad_means)
+            if use_embedding:
+                grad_means = {name: np.mean(g) for g, name in zip(normalized_grads[:5],
+                                                                  ['embed_fc1/w', 'embed_fc1/b', 'embed_fc/w', 'embed_fc/b',
+                                                                   'em_logstd'])}
+                print("Embedding grads:", grad_means)
 
             return np.mean(losses, axis=0), computed_latents, advantages
 
         def get_latent(task: int):
+            if not use_embedding:
+                return None
             one_hot = np.zeros(act_model.Task.shape)
             one_hot[:, task] = 1
             latent = sess.run(act_model.Embedding, {act_model.Task: one_hot})
             return latent[0]
 
-        self.loss_names = ['policy_loss', 'value_loss', 'approxkl', 'clipfrac', 'policy_entropy', 'embedding_entropy',
-                           'final_loss']
+        if use_embedding:
+            self.loss_names = ['policy_loss', 'value_loss', 'approxkl', 'clipfrac', 'policy_entropy', 'embedding_entropy',
+                               'final_loss']
+        else:
+            self.loss_names = ['policy_loss', 'value_loss', 'approxkl', 'clipfrac', 'policy_entropy',
+                               'final_loss']
 
         def save(save_path):
             ps = sess.run(params)
@@ -174,7 +192,10 @@ class Model(object):
 
         self.train = train
         self.train_model = train_model
-        self.inference_model = inference_model
+
+        if use_embedding:
+            self.inference_model = InferenceNetwork(sess, ob_space, ac_space, latent_space,
+                                           horizon=inference_horizon, hidden_layers=inference_hidden_layers)
         self.act_model = act_model
         self.step = act_model.step
         self.step_from_task = act_model.step_from_task

@@ -30,15 +30,16 @@ from policies import MlpEmbedPolicy
 import ppo2embed
 
 SEED = 1234
-TRAJ_SIZE = 250
+TRAJ_SIZE = 120
 TASKS = ["up"]  # , "down", "left", "right"]
 CONTROL_MODE = "position_control"
-EASY_GRIPPER_INIT = False
+EASY_GRIPPER_INIT = True
 RANDOMIZE_START_POS = False
 
 # use Beta distribution for policy, Gaussian otherwise
 USE_BETA = False
-ACTION_SCALE = 0.1 if USE_BETA else 50.
+ACTION_SCALE = 0.1 if USE_BETA else 5.
+USE_EMBEDDING = False
 
 
 def unwrap_env(env: VecNormalize, id: int = 0):
@@ -154,10 +155,10 @@ def train(num_timesteps, seed, log_folder):
                     latent_space=latent_space,
                     traj_size=TRAJ_SIZE,
                     nbatches=10,
-                    lam=0.95,
-                    gamma=0.99,
-                    policy_entropy=0.1,  # .01,  # 0.1,
-                    embedding_entropy=-0.01,  # -0.01,  # 0.01,
+                    lam=0.98,
+                    gamma=0.995,
+                    policy_entropy=0.2,  # .01,  # 0.1,
+                    embedding_entropy=-1e3,  # -0.01,  # 0.01,
                     inference_coef=0, #.001,  # 0.03,  # .001,
                     inference_opt_epochs=3,  # 3,
                     inference_horizon=3,
@@ -166,16 +167,17 @@ def train(num_timesteps, seed, log_folder):
                     pi_hidden_layers=(16, 16),
                     vf_hidden_layers=(16, 16),
                     vf_coef=1,
-                    inference_hidden_layers=(16,),
+                    inference_hidden_layers=(2,),
                     render_fn=render_robot,
                     lr=5e-3,
                     cliprange=0.2,
                     seed=seed,
                     total_timesteps=num_timesteps,
                     plot_folder=osp.join(log_folder, "plots"),
-                    plot_interval=20,
-                    render_interval=20,
+                    plot_interval=15,
+                    render_interval=15,
                     render_fps=60,
+                    use_embedding=USE_EMBEDDING,
                     traj_plot_fn=plot_traj,
                     log_folder=log_folder,
                     curriculum_fn=BasicCurriculum)

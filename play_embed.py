@@ -14,36 +14,12 @@ from model import Model
 from sampler import Sampler
 
 @click.command()
-@click.argument('config_file', type=str, default="/home/eric/embed_onpolicy/log/push_embed_1234_2018-08-13-17-16-04/configuration.pkl")
+@click.argument('config_file', type=str, default="/home/eric/.deep-rl-docker/embed_onpolicy/log/push_pos_embed_1234_2018-08-16-23-09-03/configuration.pkl")
 @click.option('--checkpoint', type=str, default="latest")
-@click.option('--n_test_rollouts', type=int, default=1)
-@click.option('--n_cherrypick_trials', type=int, default=10)
+@click.option('--n_test_rollouts', type=int, default=3)
+@click.option('--n_cherrypick_trials', type=int, default=1)
 def main(config_file, checkpoint, n_test_rollouts, n_cherrypick_trials):
     configuration = cloudpickle.load(open(config_file, "rb"))
-    # {
-    #     "make_model": make_model,
-    #     "make_env": env_fn,
-    #     "render_fn": render_fn,
-    #     "traj_plot_fn": traj_plot_fn,
-    #     "unwrap_env_fn": unwrap_env,
-    #     "traj_size": traj_size,
-    #     "task_space": task_space,
-    #     "latent_space": latent_space,
-    #     "curriculum_fn": curriculum_fn,
-    #     "seed": seed,
-    #     "gamma": gamma,
-    #     "lambda": lam,
-    #     "vf_coef": vf_coef,
-    #     "policy_entropy": policy_entropy,
-    #     "embedding_entropy": embedding_entropy,
-    #     "inference_horizon": inference_horizon,
-    #     "max_grad_norm": max_grad_norm,
-    #     "nbatches": nbatches,
-    #     "total_timesteps": total_timesteps,
-    #     "cliprange": cliprange,
-    #     "lr": lr,
-    #     "plot_folder": plot_folder
-    # }
     print("Loaded configuration from %s." % config_file)
 
     ncpu = 1
@@ -56,6 +32,7 @@ def main(config_file, checkpoint, n_test_rollouts, n_cherrypick_trials):
     checkpoints = os.path.join(config_path, "checkpoints")
     if checkpoint == "latest":
         checkpoint = sorted(list(os.walk(checkpoints))[0][2])[-1]
+    iteration = int(checkpoint)
     checkpoint = os.path.join(checkpoints, checkpoint)
     print("Loading weights from checkpoint %s." % checkpoint)
     model.load(checkpoint)
@@ -64,6 +41,7 @@ def main(config_file, checkpoint, n_test_rollouts, n_cherrypick_trials):
     ntasks = task_space.shape[0]
     unwrap_env = configuration["unwrap_env_fn"]
     envs = [configuration["make_env"](task=task) for task in range(ntasks)]
+    use_embedding = "use_embedding" not in configuration or configuration["use_embedding"]
 
     # initialize GL
     envs[0].render()
@@ -71,28 +49,29 @@ def main(config_file, checkpoint, n_test_rollouts, n_cherrypick_trials):
     sampler = Sampler(env=envs[0], unwrap_env=unwrap_env, model=model, traj_size=configuration["traj_size"],
                       inference_opt_epochs=1,
                       inference_coef=0,
-                      gamma=configuration["gamma"], lam=configuration["lambda"])
+                      gamma=configuration["gamma"], lam=configuration["lambda"],
+                      use_embedding=use_embedding)
 
     rollout_dir = os.path.join(config_path, "playbacks")
     if not os.path.exists(rollout_dir):
         os.makedirs(rollout_dir)
 
-    update = configuration["total_timesteps"] // configuration["traj_size"]
     for round in range(n_test_rollouts):
         print('####### Sampling round %i #######' % (round+1))
         for task, env in enumerate(envs):
             for cherry in range(max(1, n_cherrypick_trials)):
-                print("Sampling task %i (cherrypick trial %i of %i)..." % (task+1, cherry+1, n_cherrypick_trials))
+                if n_cherrypick_trials > 1:
+                    print("Sampling task %i (cherrypick trial %i of %i)..." % (task+1, cherry+1, n_cherrypick_trials))
 
-                rf = configuration["render_fn"](task, update)
+                rf = configuration["render_fn"](task, iteration)
                 obs, returns, masks, actions, values, neglogpacs, latents, tasks, states, epinfos, \
                 completions, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods, \
-                inference_means, inference_stds, sampled_video = sampler.run(env, task, render=rf)
+                sampled_video, extras = sampler.run(env, task, render=rf)
                 if any([info["d"] for info in epinfos]):
                     print('SUCCESS')
                     break
 
-            imageio.mimsave(osp.join(rollout_dir, 'embed_%05d_task%02d_%02d.mp4' % (update, task, round)), sampled_video, fps=20)
+            imageio.mimsave(osp.join(rollout_dir, 'embed_%05d_task%02d_%02d.mp4' % (iteration, task, round)), sampled_video, fps=60)
 
             if not "joints" in epinfos[0]:
                 print("No joint information available.")
@@ -102,7 +81,7 @@ def main(config_file, checkpoint, n_test_rollouts, n_cherrypick_trials):
                 qpos = {
                     joint_name: joints[:, joint_id] for joint_id, joint_name in enumerate(unwrapped.sim.model.joint_names)
                 }
-                with open(osp.join(rollout_dir, 'embed_%05d_task%02d_%02d.pkl' % (update, task, round)), 'wb') as fh:
+                with open(osp.join(rollout_dir, 'embed_%05d_task%02d_%02d.pkl' % (iteration, task, round)), 'wb') as fh:
                     fh.write(cloudpickle.dumps(qpos))
             print("...completed %i / %i steps" % (len(epinfos), configuration["traj_size"]))
 
