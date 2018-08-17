@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, Union
 
 import numpy as np
 
@@ -19,8 +19,9 @@ def sf01(arr):
 
 class Sampler(object):
 
-    def __init__(self, *, env: DummyVecEnv, unwrap_env: Callable, model: Model, gamma, lam, traj_size: int = 20,
-                 inference_opt_epochs: int = 4, inference_coef: float = 0.1, use_embedding: bool = True):
+    def __init__(self, *, env: DummyVecEnv, unwrap_env: Union[Callable, None], model: Model, gamma, lam,
+                 traj_size: int = 20, inference_opt_epochs: int = 4, inference_coef: float = 0.1,
+                 use_embedding: bool = True):
         self.env = env
         self.unwrap_env = unwrap_env
         self.model = model
@@ -55,7 +56,10 @@ class Sampler(object):
 
         # TODO scrap DummyVecEnv
         # assert len(env.envs) == 1
-        unenv = self.unwrap_env(env)
+        if self.unwrap_env is None:
+            unenv = env
+        else:
+            unenv = self.unwrap_env(env)
 
         # for _env in env.envs:
         #     # env.select_task(task)
@@ -96,26 +100,26 @@ class Sampler(object):
                 if self.model.use_beta:
                     alphas, betas, actions, values, mb_states, neglogpacs = self.model.step(latents, self.obs, onehots, self.states,
                                                                              self.dones,
-                                                                             action_type="sample") # TODO revert "("mean" if render else "sample"))
+                                                                             action_type=("mean" if render else "sample"))
                     c_pi_param1.append(alphas[0])
                     c_pi_param2.append(betas[0])
                 else:
                     means, stds, actions, values, mb_states, neglogpacs = self.model.step(latents, self.obs, onehots, self.states,
                                                                          self.dones,
-                                                                         action_type="sample") # TODO revert "("mean" if render else "sample"))
+                                                                         action_type=("mean" if render else "sample"))
                     c_pi_param1.append(means[0])
                     c_pi_param2.append(stds[0])
             else:
                 if self.model.use_beta:
                     alphas, betas, actions, values, mb_states, neglogpacs = self.model.step(None, self.obs, onehots, self.states,
                                                                              self.dones,
-                                                                             action_type="sample") # TODO revert "("mean" if render else "sample"))
+                                                                             action_type=("mean" if render else "sample"))
                     c_pi_param1.append(alphas[0])
                     c_pi_param2.append(betas[0])
                 else:
                     means, stds, actions, values, mb_states, neglogpacs = self.model.step(None, self.obs, onehots, self.states,
                                                                          self.dones,
-                                                                         action_type="sample") # TODO revert "("mean" if render else "sample"))
+                                                                         action_type=("mean" if render else "sample"))
                     c_pi_param1.append(means[0])
                     c_pi_param2.append(stds[0])
 

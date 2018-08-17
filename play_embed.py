@@ -14,7 +14,7 @@ from model import Model
 from sampler import Sampler
 
 @click.command()
-@click.argument('config_file', type=str, default="/home/eric/.deep-rl-docker/embed_onpolicy/log/push_pos_embed_1234_2018-08-16-23-09-03/configuration.pkl")
+@click.argument('config_file', type=str, default="/home/eric/.deep-rl-docker/embed_onpolicy/log/push_pos_embed_1234_2018-08-17-10-14-19/configuration.pkl")
 @click.option('--checkpoint', type=str, default="latest")
 @click.option('--n_test_rollouts', type=int, default=3)
 @click.option('--n_cherrypick_trials', type=int, default=1)
