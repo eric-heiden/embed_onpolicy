@@ -37,8 +37,9 @@ EASY_GRIPPER_INIT = True
 RANDOMIZE_START_POS = False
 
 # use Beta distribution for policy, Gaussian otherwise
-USE_BETA = False
-ACTION_SCALE = 0.1 if USE_BETA else 5.
+USE_BETA = True
+ACTION_SCALE = 5. if USE_BETA else 0.1
+SKIP_STEPS = 1
 USE_EMBEDDING = False
 
 
@@ -61,7 +62,9 @@ def train(num_timesteps, seed, log_folder):
                                                       control_method=CONTROL_MODE,
                                                       easy_gripper_init=EASY_GRIPPER_INIT,
                                                       randomize_start_pos=RANDOMIZE_START_POS,
-                                                      action_scale=ACTION_SCALE))]),
+                                                      action_scale=ACTION_SCALE,
+                                                      max_episode_steps=TRAJ_SIZE,
+                                                      skip_steps=SKIP_STEPS))]),
         ob=False, ret=False
     )
 
@@ -157,7 +160,7 @@ def train(num_timesteps, seed, log_folder):
                     nbatches=10,
                     lam=0.98,
                     gamma=0.995,
-                    policy_entropy=0.2,  # .01,  # 0.1,
+                    policy_entropy=0.1,  # .01,  # 0.1,
                     embedding_entropy=-1e3,  # -0.01,  # 0.01,
                     inference_coef=0, #.001,  # 0.03,  # .001,
                     inference_opt_epochs=3,  # 3,
