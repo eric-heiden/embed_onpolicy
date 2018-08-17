@@ -18,12 +18,12 @@ import numpy as np
 import rospy
 import tensorflow as tf
 
+sys.path.insert(0, osp.join(osp.dirname(__file__), 'baselines'))
+sys.path.insert(0, osp.join(osp.dirname(__file__), 'garage'))
+
 from garage.contrib.ros.envs.sawyer import PusherEnv
 from garage.misc import tensor_utils
 from garage.tf.envs import TfEnv
-
-sys.path.insert(0, osp.join(osp.dirname(__file__), 'baselines'))
-sys.path.insert(0, osp.join(osp.dirname(__file__), 'garage'))
 
 from model import Model
 from sampler import Sampler
@@ -66,16 +66,16 @@ def main(config_file, checkpoint, task_id):
     assert isinstance(sawyer_env, SawyerEnv)
     assert sawyer_env._control_method == "position_control"
     assert sawyer_env._start_configuration.joint_pos is not None
-    assert sawyer_env._goal_position.object_pos is not None
+    assert sawyer_env._goal_configuration.object_pos is not None
 
     print("Initial joint angles:", sawyer_env._start_configuration.joint_pos)
-    print("Object goal position:", sawyer_env._goal_position.object_pos)
+    print("Object goal position:", sawyer_env._goal_configuration.object_pos)
 
     moveit_commander.roscpp_initialize(sys.argv)
     rospy.init_node('rollingout_policy_push', anonymous=True)
 
     push_env = PusherEnv(
-        initial_goal=sawyer_env._goal_position.object_pos,
+        initial_goal=sawyer_env._goal_configuration.object_pos,
         initial_joint_pos=sawyer_env._start_configuration.joint_pos,
         simulated=False,
         robot_control_mode='position',
