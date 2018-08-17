@@ -74,9 +74,13 @@ def main(config_file, checkpoint, task_id):
     moveit_commander.roscpp_initialize(sys.argv)
     rospy.init_node('rollingout_policy_push', anonymous=True)
 
+    joint_config = {
+        'right_j%i' % i: pos for i, pos in enumerate(sawyer_env._start_configuration.joint_pos)
+    }
+
     push_env = PusherEnv(
         initial_goal=sawyer_env._goal_configuration.object_pos,
-        initial_joint_pos=sawyer_env._start_configuration.joint_pos,
+        initial_joint_pos=joint_config,
         simulated=False,
         robot_control_mode='position',
         action_scale=0.04
