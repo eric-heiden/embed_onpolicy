@@ -13,12 +13,15 @@ sys.path.insert(0, osp.join(osp.dirname(__file__), 'garage'))
 from model import Model
 from sampler import Sampler
 
+
 @click.command()
-@click.argument('config_file', type=str, default="/home/eric/.deep-rl-docker/embed_onpolicy/log/push_pos_embed_1234_2018-08-17-10-14-19/configuration.pkl")
-@click.option('--checkpoint', type=str, default="latest")
-@click.option('--n_test_rollouts', type=int, default=3)
+@click.argument('config_file', type=str,
+                default="/home/eric/.deep-rl-docker/embed_onpolicy/log/push_pos_embed_1234_2018-08-18-16-06-59/configuration.pkl")
+@click.option('--checkpoint', type=str, default="00450")
+@click.option('--interactive', type=bool, default=True)
+@click.option('--n_test_rollouts', type=int, default=30)
 @click.option('--n_cherrypick_trials', type=int, default=1)
-def main(config_file, checkpoint, n_test_rollouts, n_cherrypick_trials):
+def main(config_file, checkpoint, interactive, n_test_rollouts, n_cherrypick_trials):
     configuration = cloudpickle.load(open(config_file, "rb"))
     print("Loaded configuration from %s." % config_file)
 
@@ -48,7 +51,7 @@ def main(config_file, checkpoint, n_test_rollouts, n_cherrypick_trials):
 
     sampler = Sampler(env=envs[0], unwrap_env=unwrap_env, model=model, traj_size=configuration["traj_size"],
                       inference_opt_epochs=1,
-                      inference_coef=0,
+                      inference_coef=lambda _: 0,
                       gamma=configuration["gamma"], lam=configuration["lambda"],
                       use_embedding=use_embedding)
 
@@ -57,32 +60,45 @@ def main(config_file, checkpoint, n_test_rollouts, n_cherrypick_trials):
         os.makedirs(rollout_dir)
 
     for round in range(n_test_rollouts):
-        print('####### Sampling round %i #######' % (round+1))
+        print('####### Sampling round %i #######' % (round + 1))
         for task, env in enumerate(envs):
-            for cherry in range(max(1, n_cherrypick_trials)):
-                if n_cherrypick_trials > 1:
-                    print("Sampling task %i (cherrypick trial %i of %i)..." % (task+1, cherry+1, n_cherrypick_trials))
-
-                rf = configuration["render_fn"](task, iteration)
+            if interactive:
                 obs, returns, masks, actions, values, neglogpacs, latents, tasks, states, epinfos, \
                 completions, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods, \
-                sampled_video, extras = sampler.run(env, task, render=rf)
-                if any([info["d"] for info in epinfos]):
-                    print('SUCCESS')
-                    break
-
-            imageio.mimsave(osp.join(rollout_dir, 'embed_%05d_task%02d_%02d.mp4' % (iteration, task, round)), sampled_video, fps=60)
-
-            if not "joints" in epinfos[0]:
-                print("No joint information available.")
+                extras = sampler.run(0, env, task, render=None, interactive=True)
             else:
-                joints = np.array([epinfo["joints"] for epinfo in epinfos])
-                unwrapped = unwrap_env(env)
-                qpos = {
-                    joint_name: joints[:, joint_id] for joint_id, joint_name in enumerate(unwrapped.sim.model.joint_names)
-                }
-                with open(osp.join(rollout_dir, 'embed_%05d_task%02d_%02d.pkl' % (iteration, task, round)), 'wb') as fh:
-                    fh.write(cloudpickle.dumps(qpos))
+                sampled_video = None
+                epinfos = None
+                for cherry in range(max(1, n_cherrypick_trials)):
+                    if n_cherrypick_trials > 1:
+                        print("Sampling task %i (cherrypick trial %i of %i)..." % (
+                        task + 1, cherry + 1, n_cherrypick_trials))
+
+                    rf = configuration["render_fn"](task, iteration)
+                    obs, returns, masks, actions, values, neglogpacs, latents, tasks, states, epinfos, \
+                    completions, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods, \
+                    sampled_video, extras = sampler.run(0, env, task, render=rf)
+                    if any([info["d"] for info in epinfos]):
+                        print('SUCCESS')
+                        break
+
+                if sampled_video is not None:
+                    imageio.mimsave(osp.join(rollout_dir, 'embed_%05d_task%02d_%02d.mp4' % (iteration, task, round)),
+                                    sampled_video, fps=60)
+
+                if epinfos is not None:
+                    if "joints" not in epinfos[0]:
+                        print("No joint information available.")
+                    else:
+                        joints = np.array([epinfo["joints"] for epinfo in epinfos])
+                        unwrapped = unwrap_env(env)
+                        qpos = {
+                            joint_name: joints[:, joint_id] for joint_id, joint_name in
+                        enumerate(unwrapped.sim.model.joint_names)
+                        }
+                        with open(osp.join(rollout_dir, 'embed_%05d_task%02d_%02d.pkl' % (iteration, task, round)),
+                                  'wb') as fh:
+                            fh.write(cloudpickle.dumps(qpos))
             print("...completed %i / %i steps" % (len(epinfos), configuration["traj_size"]))
 
 

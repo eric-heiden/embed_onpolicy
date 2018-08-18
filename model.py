@@ -72,7 +72,7 @@ class Model(object):
             EM_ENT_COEF = tf.placeholder(tf.float32, [], name="em_ent_coef")
 
             neglogpac = train_model.neg_log_prob(A, "neglogpac")
-            entropy = tf.reduce_mean(train_model.pd.entropy(), name="entropy")
+            entropy = tf.nn.softplus(tf.reduce_mean(train_model.pd.entropy(), name="entropy"))
 
             with tf.name_scope("ValueFunction"):
                 vpred = train_model.vf

@@ -60,9 +60,6 @@ def main(config_file, checkpoint, task_id):
     env = configuration["make_env"](task=task_id)
     use_embedding = "use_embedding" not in configuration or configuration["use_embedding"]
 
-    # initialize GL
-    # env.render()
-
     sawyer_env = unwrap_env(env)  # type: SawyerEnv
     assert isinstance(sawyer_env, SawyerEnv)
     assert sawyer_env._control_method == "position_control"
@@ -82,8 +79,6 @@ def main(config_file, checkpoint, task_id):
     joint_config = {
         'right_j%i' % i: pos for i, pos in enumerate(sawyer_env._start_configuration.joint_pos)
     }
-
-
 
     push_env = PusherEnv(
         initial_goal=sawyer_env._goal_configuration.object_pos,
@@ -105,7 +100,7 @@ def main(config_file, checkpoint, task_id):
 
     sampler = Sampler(env=vec_push_env, unwrap_env=unwrap_env, model=model, traj_size=configuration["traj_size"],
                       inference_opt_epochs=1,
-                      inference_coef=0,
+                      inference_coef=lambda _: 0,
                       gamma=configuration["gamma"], lam=configuration["lambda"],
                       use_embedding=use_embedding)
 
@@ -114,7 +109,7 @@ def main(config_file, checkpoint, task_id):
         os.makedirs(rollout_dir)
     obs, returns, masks, actions, values, neglogpacs, latents, tasks, states, epinfos, \
     completions, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods, \
-    extras = sampler.run(vec_push_env, task_id)
+    extras = sampler.run(0, vec_push_env, task_id)
     if any([info["d"] for info in epinfos]):
         print('SUCCESS')
 

@@ -48,7 +48,7 @@ class Sampler(object):
         self.inference_coef = inference_coef
         self.use_embedding = use_embedding
 
-    def run(self, iteration: int, env: DummyVecEnv, task: int, render=None):
+    def run(self, iteration: int, env: DummyVecEnv, task: int, render=None, interactive=False):
         mb_obs, mb_rewards, mb_actions, mb_latents, mb_tasks, mb_values, mb_dones, mb_neglogpacs = \
             [], [], [], [], [], [], [], []
         mb_states = self.states
@@ -71,7 +71,7 @@ class Sampler(object):
         # for _env in env.envs:
         #     # env.select_task(task)
         #     self.obs[:] = _env.reset()
-        env.reset()
+        self.obs = env.reset()
         # print("Sampling task", env.task, env.start_position, env.position)
 
         epinfos = []
@@ -104,37 +104,18 @@ class Sampler(object):
         for step in range(self.traj_size):
             traj_len += 1
             if self.use_embedding:
-                if self.model.use_beta:
-                    alphas, betas, actions, values, mb_states, neglogpacs = self.model.step(latents, self.obs, onehots, self.states,
-                                                                             self.dones,
-                                                                             action_type=("mean" if render else "sample"))
-                    c_pi_param1.append(alphas[0])
-                    c_pi_param2.append(betas[0])
-                else:
-                    means, stds, actions, values, mb_states, neglogpacs = self.model.step(latents, self.obs, onehots, self.states,
+                pd1, pd2, actions, values, mb_states, neglogpacs = self.model.step(latents, self.obs, onehots, self.states,
                                                                          self.dones,
                                                                          action_type=("mean" if render else "sample"))
-                    c_pi_param1.append(means[0])
-                    c_pi_param2.append(stds[0])
+                c_pi_param1.append(pd1[0])
+                c_pi_param2.append(pd2[0])
             else:
-                if self.model.use_beta:
-                    alphas, betas, actions, values, mb_states, neglogpacs = self.model.step(None, self.obs, onehots, self.states,
-                                                                             self.dones,
-                                                                             action_type=("mean" if render else "sample"))
-                    c_pi_param1.append(alphas[0])
-                    c_pi_param2.append(betas[0])
-                else:
-                    means, stds, actions, values, mb_states, neglogpacs = self.model.step(None, self.obs, onehots, self.states,
+                pd1, pd2, actions, values, mb_states, neglogpacs = self.model.step(None, self.obs, onehots, self.states,
                                                                          self.dones,
                                                                          action_type=("mean" if render else "sample"))
-                    c_pi_param1.append(means[0])
-                    c_pi_param2.append(stds[0])
+                c_pi_param1.append(pd1[0])
+                c_pi_param2.append(pd2[0])
 
-            # actions, values, mb_states, neglogpacs = self.model.step(latents, np.zeros_like(self.obs), onehots, self.states,
-            #                                                          self.dones)
-            # actions, values, mb_states, neglogpacs = self.model.step_from_task(
-            #     self.onehots, self.obs, self.states, self.dones)
-            # actions = np.clip(actions, self.model.action_space.low[0], self.model.action_space.high[0])
             mb_actions.append(actions[0])
             mb_values.append(values)
             mb_neglogpacs.append(neglogpacs)
@@ -155,6 +136,9 @@ class Sampler(object):
 
             if render:
                 video.append(render(unenv, c_obs, c_actions, c_values, c_rewards, c_infos))
+
+            if interactive:
+                env.render()
 
             mb_obs.append(self.obs[0].copy())
             mb_rewards.append(rewards)

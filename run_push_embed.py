@@ -7,11 +7,14 @@ from typing import Callable
 import gym
 import sys
 import numpy as np
+import os
 import os.path as osp
 import tensorflow as tf
 import imageio
 from tqdm import tqdm
 from PIL import Image, ImageFont, ImageDraw
+from shutil import copyfile
+from zipfile import ZipFile
 
 from curriculum import ReverseCurriculum, BasicCurriculum
 
@@ -39,7 +42,7 @@ RANDOMIZE_START_POS = True
 # use Beta distribution for policy, Gaussian otherwise
 USE_BETA = False
 ACTION_SCALE = 5. if USE_BETA else 1.
-SKIP_STEPS = 1
+SKIP_STEPS = 4
 USE_EMBEDDING = False
 
 
@@ -160,7 +163,7 @@ def train(num_timesteps, seed, log_folder):
                     nbatches=10,
                     lam=0.98,
                     gamma=0.995,
-                    policy_entropy=ppo2embed.linear_transition(1, 0, 200),  # .01,  # 0.1,
+                    policy_entropy=ppo2embed.linear_transition(.5, 0, 200),  # .01,  # 0.1,
                     embedding_entropy=-1e3,  # -0.01,  # 0.01,
                     inference_coef=0.,  #.001,  # 0.03,  # .001,
                     inference_opt_epochs=3,  # 3,
@@ -169,10 +172,10 @@ def train(num_timesteps, seed, log_folder):
                     em_hidden_layers=(2,),
                     pi_hidden_layers=(16, 16),
                     vf_hidden_layers=(16, 16),
-                    vf_coef=ppo2embed.linear_transition(.1, 1, 50),
+                    vf_coef=ppo2embed.linear_transition(.1, .2, 400),
                     inference_hidden_layers=(2,),
                     render_fn=render_robot,
-                    lr=5e-3,
+                    lr=ppo2embed.linear_transition(7e-3, 5e-3, 300, continue_beyond_end=True, absolute_min=1e-4),
                     cliprange=0.2,
                     seed=seed,
                     total_timesteps=num_timesteps,
@@ -190,6 +193,12 @@ def main():
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     log_folder = osp.join(osp.dirname(__file__), 'log/push_pos_embed_%i_%s' % (SEED, timestamp))
     print("Logging to %s." % log_folder)
+    plot_folder = osp.join(log_folder, "plots")
+    if plot_folder and not os.path.exists(plot_folder):
+        os.makedirs(plot_folder)
+    with ZipFile(osp.join(log_folder, "source.zip"), 'w') as zip:
+        for file in [osp.basename(__file__), "ppo2embed.py", "sampler.py", "policies.py", "visualizer.py"]:
+            zip.write(file)
     logger.configure(dir=log_folder, format_strs=['stdout', 'log', 'csv'])
     train(num_timesteps=1e6, seed=SEED, log_folder=log_folder)
 

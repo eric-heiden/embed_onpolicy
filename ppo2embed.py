@@ -24,7 +24,14 @@ def const_fn(val):
     return lambda _: val
 
 
-def linear_transition(start, end, end_iteration: int):
+def linear_transition(start, end, end_iteration: int, continue_beyond_end: bool = False,
+                      absolute_min = None, absolute_max = None):
+    if continue_beyond_end:
+        if absolute_min:
+            return lambda iteration: max(absolute_min, (end - start) * iteration / end_iteration + start)
+        if absolute_max:
+            return lambda iteration: min(absolute_max, (end - start) * iteration / end_iteration + start)
+        return lambda iteration: (end - start) * iteration / end_iteration + start
     return lambda iteration: (end - start) * min(1., iteration / end_iteration) + start
 
 
@@ -62,9 +69,6 @@ def learn(*, policy, env_fn, unwrap_env, task_space, latent_space, traj_size,
     embedding_entropy = make_callable(embedding_entropy)
     vf_coef = make_callable(vf_coef)
     inference_coef = make_callable(inference_coef)
-
-    if plot_folder and not os.path.exists(plot_folder):
-        os.makedirs(plot_folder)
 
     total_timesteps = int(total_timesteps)
 
@@ -275,6 +279,7 @@ def learn(*, policy, env_fn, unwrap_env, task_space, latent_space, traj_size,
                 # log("ppo_internals/values", safemean([b[5] for b in training_batches]), update)
                 # log("ppo_internals/advantages", safemean(advantages), update)
 
+                print("Run:", log_folder)
                 logger.dumpkvs()
                 summary_writer.flush()
         if save_interval and (iteration % save_interval == 0 or iteration == 0) and logger.get_dir():
