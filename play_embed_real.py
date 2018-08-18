@@ -71,6 +71,10 @@ def main(config_file, checkpoint, task_id):
     print("Initial joint angles:", sawyer_env._start_configuration.joint_pos)
     print("Object goal position:", sawyer_env._goal_configuration.object_pos)
 
+    for key, value in configuration.items():
+        if isinstance(value, int) or isinstance(value, str) or isinstance(value, float):
+            print('%s:\t%s' % (key, value))
+
     moveit_commander.roscpp_initialize(sys.argv)
     rospy.init_node('rollingout_policy_push', anonymous=True)
 
@@ -88,9 +92,7 @@ def main(config_file, checkpoint, task_id):
     push_env._robot.set_joint_position_speed(0.05)
     rospy.on_shutdown(push_env.shutdown)
 
-
     push_env.initialize()
-
 
     sampler = Sampler(env=push_env, unwrap_env=None, model=model, traj_size=configuration["traj_size"],
                       inference_opt_epochs=1,
@@ -106,6 +108,8 @@ def main(config_file, checkpoint, task_id):
     extras = sampler.run(env, task_id)
     if any([info["d"] for info in epinfos]):
         print('SUCCESS')
+
+    print("Rollout completed after %i steps. Good bye!", len(obs))
 
 
 if __name__ == '__main__':
