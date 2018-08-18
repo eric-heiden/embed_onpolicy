@@ -25,14 +25,14 @@ class Sampler(object):
         self.env = env
         self.unwrap_env = unwrap_env
         self.model = model
-        nenv = env.num_envs if hasattr(env, 'num_envs') else 1
-        assert (nenv == 1)  # ensure to sample from embedding the same number of steps, in training and acting
+        self.nenv = env.num_envs if hasattr(env, 'num_envs') else 1
+        assert (self.nenv == 1)  # ensure to sample from embedding the same number of steps, in training and acting
 
-        self.batch_ob_shape = (nenv * traj_size,) + env.observation_space.shape
-        self.obs = np.zeros((nenv,) + env.observation_space.shape, dtype=env.observation_space.dtype.name)
+        self.batch_ob_shape = (self.nenv * traj_size,) + env.observation_space.shape
+        self.obs = np.zeros((self.nenv,) + env.observation_space.shape, dtype=env.observation_space.dtype.name)
         self.obs[:] = env.reset()
         self.states = model.initial_state
-        self.dones = [False for _ in range(nenv)]
+        self.dones = [False for _ in range(self.nenv)]
 
         self.lam = lam
         self.gamma = gamma
@@ -50,7 +50,7 @@ class Sampler(object):
         latents = []
         one_hot = np.zeros((self.model.task_space.shape[0],))
         one_hot[task] = 1
-        for _ in range(self.env.num_envs):
+        for _ in range(self.nenv):
             onehots.append(one_hot)
             latents.append(self.model.get_latent(task))
 
