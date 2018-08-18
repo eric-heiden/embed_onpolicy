@@ -68,6 +68,7 @@ class MlpPolicy(object):
 class MlpEmbedPolicy(object):
     def __init__(self, sess: tf.Session, ob_space: Box, ac_space: Box, task_space: Box, latent_space: Box,
                  traj_size, reuse=False, name="model", use_beta=False, seed=None, use_embedding=True,
+                 gauss_limited=True,
                  em_hidden_layers=(8,), pi_hidden_layers=(16, 16), vf_hidden_layers=(16, 16),
                  activation_fn=tf.nn.leaky_relu, embedding_actiation_fn=tf.identity):
 
@@ -129,6 +130,8 @@ class MlpEmbedPolicy(object):
                     vf_input = vf_h
                 vf = fc(vf_input, 'vf', 1)[:, 0]
 
+            l, h = ac_space.low, ac_space.high
+            action_range = h - l
             if use_beta:
                 # use Beta distribution
                 with tf.name_scope("PolicyDist_beta"):
@@ -141,29 +144,30 @@ class MlpEmbedPolicy(object):
                 # use Gaussian distribution
                 with tf.name_scope("PolicyDist_normal"):
                     self.pd_param1 = fc(pi_input, 'pi', ac_space.shape[0], init_scale=0.01, init_bias=0.)
+                    if gauss_limited:
+                        self.pd_param1 = tf.sigmoid(self.pd_param1, name="limit_mean")
                     logstd = tf.get_variable(name='pi_logstd', shape=[1, ac_space.shape[0]],
                                              initializer=tf.zeros_initializer, trainable=True)
                     self.pd_param2 = tf.exp(logstd)
+                    if gauss_limited:
+                        self.pd_param2 = tf.identity(self.pd_param2 * action_range, name="limit_std")
                     self.pd = tf.distributions.Normal(self.pd_param1, self.pd_param2, allow_nan_stats=False, name="PolicyDist_normal")
 
             with tf.name_scope("action"):
-                # TODO revert
-                # action = self.pd.mean(name="action")
                 action = self.pd.sample(name="action", seed=seed)
                 action_mean = self.pd.mean("action_mean")
                 action_mode = self.pd.mode("action_mode")
 
-            l, h = ac_space.low, ac_space.high
-            if use_beta:
+            if use_beta or gauss_limited:
                 with tf.name_scope("transform_action"):
-                    action = action * (h - l) + l
-                    action_mean = action_mean * (h - l) + l
-                    action_mode = action_mode * (h - l) + l
+                    action = action * action_range + l
+                    action_mean = action_mean * action_range + l
+                    action_mode = action_mode * action_range + l
 
             def neg_log_prob(var: tf.Tensor, var_name="var"):
                 with tf.name_scope("neg_log_prob_%s" % var_name):
-                    if use_beta:
-                        var = (var - l) / (h-l)
+                    if use_beta or gauss_limited:
+                        var = (var - l) / action_range
                         return tf.identity(-tf.reduce_sum(self.pd.log_prob(tf.clip_by_value(var, EPS, 1. - EPS)), axis=-1), name="neg_log_prob_%s" % var_name)
                     else:
                         return tf.identity(-tf.reduce_sum(self.pd.log_prob(var), axis=-1), name="neg_log_prob_%s" % var_name)

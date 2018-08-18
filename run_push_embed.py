@@ -34,11 +34,11 @@ TRAJ_SIZE = 120
 TASKS = ["up"]  # , "down", "left", "right"]
 CONTROL_MODE = "position_control"
 EASY_GRIPPER_INIT = True
-RANDOMIZE_START_POS = False
+RANDOMIZE_START_POS = True
 
 # use Beta distribution for policy, Gaussian otherwise
-USE_BETA = True
-ACTION_SCALE = 5. if USE_BETA else 0.1
+USE_BETA = False
+ACTION_SCALE = 5. if USE_BETA else 1.
 SKIP_STEPS = 1
 USE_EMBEDDING = False
 
@@ -160,7 +160,7 @@ def train(num_timesteps, seed, log_folder):
                     nbatches=10,
                     lam=0.98,
                     gamma=0.995,
-                    policy_entropy=0.1,  # .01,  # 0.1,
+                    policy_entropy=10.,  # .01,  # 0.1,
                     embedding_entropy=-1e3,  # -0.01,  # 0.01,
                     inference_coef=0, #.001,  # 0.03,  # .001,
                     inference_opt_epochs=3,  # 3,
