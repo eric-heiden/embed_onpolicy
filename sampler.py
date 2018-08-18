@@ -4,9 +4,16 @@ import numpy as np
 
 from collections import deque
 
+from model import Model
+
 from baselines.common.vec_env.dummy_vec_env import DummyVecEnv
 
-from model import Model
+
+TimeVarying = Callable[[int], float]
+
+
+def const_fn(val):
+    return lambda _: val
 
 
 def sf01(arr):
@@ -20,7 +27,7 @@ def sf01(arr):
 class Sampler(object):
 
     def __init__(self, *, env: DummyVecEnv, unwrap_env: Union[Callable, None], model: Model, gamma, lam,
-                 traj_size: int = 20, inference_opt_epochs: int = 4, inference_coef: float = 0.1,
+                 traj_size: int = 20, inference_opt_epochs: int = 4, inference_coef: TimeVarying = const_fn(0.1),
                  use_embedding: bool = True):
         self.env = env
         self.unwrap_env = unwrap_env
@@ -41,7 +48,7 @@ class Sampler(object):
         self.inference_coef = inference_coef
         self.use_embedding = use_embedding
 
-    def run(self, env: DummyVecEnv, task: int, render=None):
+    def run(self, iteration: int, env: DummyVecEnv, task: int, render=None):
         mb_obs, mb_rewards, mb_actions, mb_latents, mb_tasks, mb_values, mb_dones, mb_neglogpacs = \
             [], [], [], [], [], [], [], []
         mb_states = self.states
@@ -230,7 +237,7 @@ class Sampler(object):
 
         if self.use_embedding:
             # mb_rewards += self.inference_coef * inference_discounted_log_likelihoods.reshape(mb_rewards.shape)
-            mb_rewards += self.inference_coef * inference_discounted_log_likelihoods
+            mb_rewards += self.inference_coef(iteration) * inference_discounted_log_likelihoods
 
         for t in reversed(range(traj_len)):
             if t == traj_len - 1:

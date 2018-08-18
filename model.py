@@ -1,3 +1,5 @@
+from typing import Callable
+
 import tensorflow as tf
 import numpy as np
 import joblib
@@ -5,10 +7,17 @@ import joblib
 from inference_net import InferenceNetwork
 from policies import MlpEmbedPolicy
 
+TimeVarying = Callable[[int], float]
+
+
+def const_fn(val):
+    return lambda _: val
+
 
 class Model(object):
-    def __init__(self, *, policy, ob_space, ac_space, task_space, latent_space, traj_size, policy_entropy, vf_coef,
-                 max_grad_norm, embedding_entropy=0., inference_horizon=5, seed=None, em_hidden_layers=(8,),
+    def __init__(self, *, policy, ob_space, ac_space, task_space, latent_space, traj_size, cliprange: TimeVarying,
+                 lr: TimeVarying, policy_entropy: TimeVarying, vf_coef: TimeVarying, max_grad_norm,
+                 embedding_entropy: TimeVarying = const_fn(0.), inference_horizon=5, seed=None, em_hidden_layers=(8,),
                  pi_hidden_layers=(16, 16), vf_hidden_layers=(16, 16), inference_hidden_layers=(16,),
                  use_embedding=True, **_kwargs):
 
@@ -18,13 +27,17 @@ class Model(object):
         self.inference_horizon = inference_horizon
         self.vf_coef = vf_coef
         self.seed = seed
+        self.cliprange = cliprange
+        self.lr = lr
 
         self.parameters = {
             "traj_size": traj_size,
-            "policy_entropy": policy_entropy,
-            "embedding_entropy": embedding_entropy,
+            "policy_entropy": policy_entropy(0),
+            "embedding_entropy": embedding_entropy(0),
             "inference_horizon": inference_horizon,
-            "vf_coef": vf_coef,
+            "vf_coef": vf_coef(0),
+            "lr": lr(0),
+            "cliprange": cliprange(0),
             "seed": ('None' if seed is None else seed)
         }
 
@@ -50,10 +63,14 @@ class Model(object):
             R = tf.placeholder(tf.float32, [None], name="returns")
             OLDNEGLOGPAC = tf.placeholder(tf.float32, [None], name="old_neglogpac")
             OLDVPRED = tf.placeholder(tf.float32, [None], name="old_vpred")
+
+            # time-varying parameters
             LR = tf.placeholder(tf.float32, [], name="learning_rate")
             CLIPRANGE = tf.placeholder(tf.float32, [], name="clip_range")
+            VF_COEFF = tf.placeholder(tf.float32, [], name="vf_coeff")
+            PI_ENT_COEF = tf.placeholder(tf.float32, [], name="pi_ent_coef")
+            EM_ENT_COEF = tf.placeholder(tf.float32, [], name="em_ent_coef")
 
-            # neglogpac = train_model.pd.neglogp(A)
             neglogpac = train_model.neg_log_prob(A, "neglogpac")
             entropy = tf.reduce_mean(train_model.pd.entropy(), name="entropy")
 
@@ -73,15 +90,15 @@ class Model(object):
                 pg_loss = tf.reduce_mean(tf.maximum(pg_losses, pg_losses2), name="pg_loss")
                 approxkl = tf.identity(.5 * tf.reduce_mean(tf.square(neglogpac - OLDNEGLOGPAC)), name="approx_kl")
                 clipfrac = tf.reduce_mean(tf.to_float(tf.greater(tf.abs(ratio - 1.0), CLIPRANGE)), name="clip_frac")
-                loss = tf.identity(pg_loss + vf_loss * vf_coef, name="policy_loss")
+                loss = tf.identity(pg_loss + vf_loss * VF_COEFF, name="policy_loss")
 
                 if use_embedding:
                     final_loss = tf.identity(loss
-                                             - policy_entropy * entropy
-                                             - embedding_entropy * train_model.embedding_entropy,
+                                             - PI_ENT_COEF * entropy
+                                             - EM_ENT_COEF * train_model.embedding_entropy,
                                              name="final_loss")
                 else:
-                    final_loss = tf.identity(loss - policy_entropy * entropy,
+                    final_loss = tf.identity(loss - PI_ENT_COEF * entropy,
                                              name="final_loss")
 
             with tf.variable_scope('model', reuse=True):
@@ -101,7 +118,13 @@ class Model(object):
                 # grads = trainer.compute_gradients(final_loss, var_list=params)
                 _train = trainer.apply_gradients(grads)
 
-        def train(lr, cliprange, batches):
+        def train(iteration: int, batches):
+            self.parameters["policy_entropy"] = policy_entropy(iteration)
+            self.parameters["embedding_entropy"] = embedding_entropy(iteration)
+            self.parameters["vf_coef"] = vf_coef(iteration)
+            self.parameters["lr"] = lr(iteration)
+            self.parameters["cliprange"] = cliprange(iteration)
+
             computed_latents = []
             gradients = None
             losses = []
@@ -119,7 +142,10 @@ class Model(object):
                     A: actions,
                     ADV: advs,
                     R: returns,
-                    CLIPRANGE: cliprange,
+                    CLIPRANGE: self.cliprange(iteration),
+                    VF_COEFF: self.vf_coef(iteration),
+                    PI_ENT_COEF: self.policy_entropy(iteration),
+                    EM_ENT_COEF: self.embedding_entropy(iteration),
                     OLDNEGLOGPAC: neglogpacs,
                     OLDVPRED: values
                 }
@@ -139,8 +165,6 @@ class Model(object):
                         td_map
                     )
 
-                # print("Observation len: ", result[-3], " true:", np.shape(obs))
-
                 losses.append(result[:len(self.loss_names)])
                 computed_latents.append(result[-2])
                 if gradients is None:
@@ -153,12 +177,16 @@ class Model(object):
             normalized_grads = []
             for i in range(len(gradients)):
                 normalized_grads.append(np.mean(gradients[i], axis=0))
-            sess.run([_train], {src_grads: normalized_grads, LR: lr, CLIPRANGE: cliprange})
+            sess.run([_train], {
+                src_grads: normalized_grads,
+                LR: lr(iteration),
+                CLIPRANGE: cliprange(iteration)
+            })
 
             if use_embedding:
                 grad_means = {name: np.mean(g) for g, name in zip(normalized_grads[:5],
-                                                                  ['embed_fc1/w', 'embed_fc1/b', 'embed_fc/w', 'embed_fc/b',
-                                                                   'em_logstd'])}
+                                                                  ['embed_fc1/w', 'embed_fc1/b', 'embed_fc/w',
+                                                                   'embed_fc/b', 'em_logstd'])}
                 print("Embedding grads:", grad_means)
 
             return np.mean(losses, axis=0), computed_latents, advantages
@@ -172,8 +200,8 @@ class Model(object):
             return latent[0]
 
         if use_embedding:
-            self.loss_names = ['policy_loss', 'value_loss', 'approxkl', 'clipfrac', 'policy_entropy', 'embedding_entropy',
-                               'final_loss']
+            self.loss_names = ['policy_loss', 'value_loss', 'approxkl', 'clipfrac', 'policy_entropy',
+                               'embedding_entropy', 'final_loss']
         else:
             self.loss_names = ['policy_loss', 'value_loss', 'approxkl', 'clipfrac', 'policy_entropy',
                                'final_loss']
@@ -195,7 +223,7 @@ class Model(object):
 
         if use_embedding:
             self.inference_model = InferenceNetwork(sess, ob_space, ac_space, latent_space,
-                                           horizon=inference_horizon, hidden_layers=inference_hidden_layers)
+                                                    horizon=inference_horizon, hidden_layers=inference_hidden_layers)
         self.act_model = act_model
         self.step = act_model.step
         self.step_from_task = act_model.step_from_task

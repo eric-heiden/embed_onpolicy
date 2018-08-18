@@ -3,6 +3,7 @@ import os.path as osp
 import sys
 import time
 from collections import deque
+from typing import Union, Callable
 
 import imageio
 import numpy as np
@@ -16,13 +17,18 @@ from visualizer import Visualizer
 sys.path.insert(0, osp.join(osp.dirname(__file__), 'baselines'))
 
 from baselines import logger
+from baselines.common.math_util import explained_variance
 
 
-def constfn(val):
-    def f(_):
-        return val
+def const_fn(val):
+    return lambda _: val
 
-    return f
+
+def linear_transition(start, end, end_iteration: int):
+    return lambda iteration: (end - start) * min(1., iteration / end_iteration) + start
+
+
+TimeVarying = Union[float, Callable[[int], float]]
 
 
 def safemean(xs):
@@ -31,24 +37,31 @@ def safemean(xs):
     return np.nan if len(xs) == 0 else np.mean(xs)
 
 
+def make_callable(what: TimeVarying):
+    if isinstance(what, float):
+        what = const_fn(what)
+    else:
+        assert callable(what)
+    return what
+
+
 def learn(*, policy, env_fn, unwrap_env, task_space, latent_space, traj_size,
           nbatches, total_timesteps,
-          policy_entropy, embedding_entropy, inference_coef, inference_horizon, lr,
-          vf_coef=0.5, max_grad_norm=0.5, gamma=0.99, lam=0.95,
-          log_interval=10, inference_opt_epochs=4, cliprange=0.2, seed=None,
+          policy_entropy: TimeVarying, embedding_entropy: TimeVarying, inference_coef: TimeVarying,
+          inference_horizon, lr: TimeVarying,
+          vf_coef: TimeVarying =0.5, max_grad_norm=0.5, gamma=0.99, lam=0.95,
+          log_interval=10, inference_opt_epochs=4, cliprange: TimeVarying = 0.2, seed=None,
           save_interval=50, load_path=None, plot_interval=50, plot_event_interval=200,
           plot_folder=None, traj_plot_fn=None, log_folder=None,
           render_interval=-1, render_fn=None, render_fps=20, curriculum_fn=BasicCurriculum,
           use_embedding=True,
           **kwargs):
-    if isinstance(lr, float):
-        lr = constfn(lr)
-    else:
-        assert callable(lr)
-    if isinstance(cliprange, float):
-        cliprange = constfn(cliprange)
-    else:
-        assert callable(cliprange)
+    lr = make_callable(lr)
+    cliprange = make_callable(cliprange)
+    policy_entropy = make_callable(policy_entropy)
+    embedding_entropy = make_callable(embedding_entropy)
+    vf_coef = make_callable(vf_coef)
+    inference_coef = make_callable(inference_coef)
 
     if plot_folder and not os.path.exists(plot_folder):
         os.makedirs(plot_folder)
@@ -64,7 +77,7 @@ def learn(*, policy, env_fn, unwrap_env, task_space, latent_space, traj_size,
 
     make_model = lambda: Model(policy=policy, ob_space=ob_space, ac_space=ac_space,
                                task_space=task_space, latent_space=latent_space,
-                               traj_size=traj_size,
+                               traj_size=traj_size, cliprange=cliprange, lr=lr,
                                policy_entropy=policy_entropy,
                                embedding_entropy=embedding_entropy,
                                inference_horizon=inference_horizon,
@@ -130,16 +143,14 @@ def learn(*, policy, env_fn, unwrap_env, task_space, latent_space, traj_size,
                                                                       simple_value=value)]), update)
 
     nupdates = total_timesteps // traj_size
-    for update in range(1, nupdates + 1):
+    for iteration in range(nupdates):
         tstart = time.time()
-        frac = 1.0 - (update - 1.0) / nupdates
-        lrnow = lr(frac)
-        cliprangenow = cliprange(frac)
 
         inference_losses = []
         sampled_tasks = []
         completion_ratios = np.zeros(ntasks)
         neglogpacs_total = []
+        explained_variances = []
 
         training_batches = []
         visualization_batches = []
@@ -149,16 +160,16 @@ def learn(*, policy, env_fn, unwrap_env, task_space, latent_space, traj_size,
         for task, envs in enumerate(curriculum.strategy):
             for i_batch, env in enumerate(envs):
                 if render_fn is not None and render_interval > 0 and (
-                        update == 1 or update % render_interval == 0) and i_batch == 0:
-                    rf = render_fn(task, update)
+                        iteration == 0 or iteration % render_interval == 0) and i_batch == 0:
+                    rf = render_fn(task, iteration)
                     obs, returns, masks, actions, values, neglogpacs, latents, tasks, states, epinfos, \
                     completions, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods, \
-                    sampled_video, extras = sampler.run(env, task, render=rf)
+                    sampled_video, extras = sampler.run(iteration, env, task, render=rf)
                     video += sampled_video
                 else:
                     obs, returns, masks, actions, values, neglogpacs, latents, tasks, states, epinfos, \
                     completions, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods, \
-                    extras = sampler.run(env, task)
+                    extras = sampler.run(iteration, env, task)
                 epinfobuf.extend(epinfos)
                 training_batches.append((obs, tasks, returns, masks, actions, values, neglogpacs, states))
                 visualization_batches.append((obs, tasks, returns, masks, actions, values, neglogpacs, latents, epinfos, extras))
@@ -166,13 +177,14 @@ def learn(*, policy, env_fn, unwrap_env, task_space, latent_space, traj_size,
                 act_latents.append(latents)
                 inference_losses.append(inference_loss)
                 sampled_tasks.append(tasks)
+                explained_variances.append(explained_variance(values, returns))
                 completion_ratios[task] += completions
         completion_ratios /= 1. * nbatches
 
         if len(video) > 0 and plot_folder is not None:
-            imageio.mimsave(osp.join(plot_folder, 'embed_%05d.mp4' % update), video, fps=render_fps)
+            imageio.mimsave(osp.join(plot_folder, 'embed_%05d.mp4' % iteration), video, fps=render_fps)
 
-        train_return = model.train(lrnow, cliprangenow, training_batches)
+        train_return = model.train(iteration, training_batches)
         train_latents = train_return[-2]
         advantages = train_return[-1]
         latent_distances = [np.mean(np.abs(np.array(al) - np.array(tl))) for al, tl in zip(act_latents, train_latents)]
@@ -223,35 +235,40 @@ def learn(*, policy, env_fn, unwrap_env, task_space, latent_space, traj_size,
         lossvals = np.mean(mblossvals, axis=0)
         tnow = time.time()
         fps = int(traj_size / (tnow - tstart))
-        if plot_interval and (update % plot_interval == 0 or update == 1):
-            image = visualizer.visualize(update, visualization_batches, curriculum)
-            if update == 1:
+        if plot_interval and (iteration % plot_interval == 0 or iteration == 0):
+            image = visualizer.visualize(iteration, visualization_batches, curriculum)
+            if iteration == 0:
                 vis_placeholder = tf.placeholder(tf.uint8, image.shape)
                 vis_summary = tf.summary.image('episode_microscope', vis_placeholder)
-            if update % plot_event_interval == 0 or update == 1:
-                summary_writer.add_summary(vis_summary.eval(feed_dict={vis_placeholder: image}), update)
-        if update % log_interval == 0 or update == 1:
+            if iteration % plot_event_interval == 0 or iteration == 0:
+                summary_writer.add_summary(vis_summary.eval(feed_dict={vis_placeholder: image}), iteration)
+        if iteration % log_interval == 0 or iteration == 0:
             with tf.name_scope('summaries'):
-                # ev = explained_variance(values, returns)
-                # logger.logkv("explained_variance", float(ev))
-                # logger.logkv("nupdates", update)
-                # logger.logkv("total_timesteps", update * nbatch)
-                log("fps", fps, update)
+                log("explained_variance", safemean(explained_variances), iteration)
+                log("fps", fps, iteration)
                 for t in range(ntasks):
-                    log("completion_ratio/task_%i" % t, safemean(completion_ratios[t::ntasks]), update)
+                    log("completion_ratio/task_%i" % t, safemean(completion_ratios[t::ntasks]), iteration)
                 if isinstance(curriculum, ReverseCurriculum):
                     for t in range(ntasks):
-                        log("curriculum_progress/task_%i" % t, curriculum.task_progress_ratios[t], update)
-                log("latent_sample_error", latent_distances, update)
-                log("episode/reward", safemean([epinfo['r'] for epinfo in epinfobuf]), update)
-                log("episode/length", safemean([epinfo['l'] for epinfo in epinfobuf]), update)
+                        log("curriculum_progress/task_%i" % t, curriculum.task_progress_ratios[t], iteration)
+                log("latent_sample_error", latent_distances, iteration)
+                log("episode/reward", safemean([epinfo['r'] for epinfo in epinfobuf]), iteration)
+                log("episode/length", safemean([epinfo['l'] for epinfo in epinfobuf]), iteration)
                 # for t in range(task_space.shape[0]):
                 #     log("sampled_task/%i" % t, np.sum(sampled_tasks[:, t]), update)
-                log('time_elapsed', tnow - tfirststart, update)
-                log('iteration', update, update)
+                log('time_elapsed', tnow - tfirststart, iteration)
+                log('iteration', iteration, iteration)
                 for (lossval, lossname) in zip(lossvals, model.loss_names):
-                    log("loss/%s" % lossname, lossval, update)
-                log("loss/inference_net", safemean(inference_losses), update)
+                    log("loss/%s" % lossname, lossval, iteration)
+                log("loss/inference_net", safemean(inference_losses), iteration)
+
+                log("params/lr", lr(iteration), iteration)
+                log("params/cliprange", cliprange(iteration), iteration)
+                log("params/vf_coef", vf_coef(iteration), iteration)
+                if use_embedding:
+                    log("params/inference_coef", inference_coef(iteration), iteration)
+                    log("params/embedding_entropy", embedding_entropy(iteration), iteration)
+                log("params/policy_entropy", policy_entropy(iteration), iteration)
 
                 # log("ppo_internals/neglogpac", safemean(neglogpacs_total), update)
                 # log("ppo_internals/returns", safemean([b[2] for b in training_batches]), update)
@@ -260,10 +277,10 @@ def learn(*, policy, env_fn, unwrap_env, task_space, latent_space, traj_size,
 
                 logger.dumpkvs()
                 summary_writer.flush()
-        if save_interval and (update % save_interval == 0 or update == 1) and logger.get_dir():
+        if save_interval and (iteration % save_interval == 0 or iteration == 0) and logger.get_dir():
             checkdir = osp.join(logger.get_dir(), 'checkpoints')
             os.makedirs(checkdir, exist_ok=True)
-            savepath = osp.join(checkdir, '%.5i' % update)
+            savepath = osp.join(checkdir, '%.5i' % iteration)
             print('Saving to', savepath)
             model.save(savepath)
     env.close()
