@@ -101,7 +101,7 @@ def main(config_file, checkpoint, task_id):
     vec_push_env = DummyVecEnv([lambda: push_env])
 
     def unwrap_env(env: DummyVecEnv, id: int = 0):
-        return env.envs[id].env
+        return env.envs[id]
 
     sampler = Sampler(env=vec_push_env, unwrap_env=unwrap_env, model=model, traj_size=configuration["traj_size"],
                       inference_opt_epochs=1,
