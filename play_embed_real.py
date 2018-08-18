@@ -105,7 +105,7 @@ def main(config_file, checkpoint, task_id):
         os.makedirs(rollout_dir)
     obs, returns, masks, actions, values, neglogpacs, latents, tasks, states, epinfos, \
     completions, inference_loss, inference_log_likelihoods, inference_discounted_log_likelihoods, \
-    extras = sampler.run(env, task_id)
+    extras = sampler.run(push_env, task_id)
     if any([info["d"] for info in epinfos]):
         print('SUCCESS')
 
