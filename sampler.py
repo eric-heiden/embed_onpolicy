@@ -25,7 +25,7 @@ class Sampler(object):
         self.env = env
         self.unwrap_env = unwrap_env
         self.model = model
-        nenv = env.num_envs
+        nenv = env.num_envs if hasattr(env, 'num_envs') else 1
         assert (nenv == 1)  # ensure to sample from embedding the same number of steps, in training and acting
 
         self.batch_ob_shape = (nenv * traj_size,) + env.observation_space.shape
