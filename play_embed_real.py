@@ -90,7 +90,7 @@ def main(config_file, checkpoint, task_id):
         initial_joint_pos=joint_config,
         simulated=False,
         robot_control_mode='position',
-        action_scale=0.04
+        action_scale=1.
     )
     push_env._robot.set_joint_position_speed(0.05)
     rospy.on_shutdown(push_env.shutdown)
