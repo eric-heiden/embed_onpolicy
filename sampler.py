@@ -158,7 +158,7 @@ class Sampler(object):
             mb_latents.append(np.array(latents).flatten())
 
             # epinfos += [info["episode"] for info in infos]
-            epinfos.append(infos["episode"])
+            epinfos.append(infos["episode"] if "episode" in infos else {"d": False, "r": 0})
 
             # if any(self.dones):
             # self.obs[:] = self.env.reset()
@@ -188,7 +188,7 @@ class Sampler(object):
             #     for _ in range(self.model.inference_model.horizon):
             #         traj_window.append(np.concatenate((self.obs.copy(), actions)))
             #     discounts.append(self.gamma)
-            if infos["episode"]["d"]:
+            if "episode" in infos and "d" in infos["episode"] and infos["episode"]["d"]:
                 completions = 1
                 # TODO revert
                 # break
