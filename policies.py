@@ -147,7 +147,7 @@ class MlpEmbedPolicy(object):
                     if gauss_limited:
                         self.pd_param1 = tf.sigmoid(self.pd_param1, name="limit_mean")
                     logstd = tf.get_variable(name='pi_logstd', shape=[1, ac_space.shape[0]],
-                                             initializer=tf.zeros_initializer, trainable=True)
+                                             initializer=tf.constant_initializer(0.), trainable=True)
                     self.pd_param2 = tf.exp(logstd)
                     if gauss_limited:
                         self.pd_param2 = tf.identity(self.pd_param2 * action_range, name="limit_std")

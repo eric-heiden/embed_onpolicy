@@ -48,7 +48,7 @@ class Sampler(object):
         self.inference_coef = inference_coef
         self.use_embedding = use_embedding
 
-    def run(self, iteration: int, env: DummyVecEnv, task: int, render=None, interactive=False):
+    def run(self, iteration: int, env: DummyVecEnv, task: int, render=None, interactive=False, sample_mean=False):
         mb_obs, mb_rewards, mb_actions, mb_latents, mb_tasks, mb_values, mb_dones, mb_neglogpacs = \
             [], [], [], [], [], [], [], []
         mb_states = self.states
@@ -106,13 +106,13 @@ class Sampler(object):
             if self.use_embedding:
                 pd1, pd2, actions, values, mb_states, neglogpacs = self.model.step(latents, self.obs, onehots, self.states,
                                                                          self.dones,
-                                                                         action_type=("mean" if render else "sample"))
+                                                                         action_type=("mean" if sample_mean else "sample"))
                 c_pi_param1.append(pd1[0])
                 c_pi_param2.append(pd2[0])
             else:
                 pd1, pd2, actions, values, mb_states, neglogpacs = self.model.step(None, self.obs, onehots, self.states,
                                                                          self.dones,
-                                                                         action_type=("mean" if render else "sample"))
+                                                                         action_type=("mean" if sample_mean else "sample"))
                 c_pi_param1.append(pd1[0])
                 c_pi_param2.append(pd2[0])
 

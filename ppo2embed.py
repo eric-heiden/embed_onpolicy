@@ -72,7 +72,7 @@ def learn(*, policy, env_fn, unwrap_env, task_space, latent_space, traj_size,
 
     total_timesteps = int(total_timesteps)
 
-    env = env_fn(task=0)  # instantiate and environment ust to get the spaces
+    env = env_fn(task=0)  # instantiate and environment just to get the spaces
     nenvs = 1  # env.num_envs
     ob_space = env.observation_space
     ac_space = env.action_space

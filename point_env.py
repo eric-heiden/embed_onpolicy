@@ -25,8 +25,8 @@ ACTION_LIMIT = 0.3
 
 
 class PointEnv(gym.Env):
-    def __init__(self, show_traces=True):
-        self._task = 0
+    def __init__(self, task=0, show_traces=True):
+        self._task = task
         self._goal = np.array(TASKS[self._task], dtype=np.float32)
         self._point = np.zeros(2)
 
@@ -41,11 +41,11 @@ class PointEnv(gym.Env):
 
     @property
     def observation_space(self):
-        return gym.spaces.Box(low=-np.inf, high=np.inf, shape=(2,))
+        return gym.spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32)
 
     @property
     def action_space(self):
-        return gym.spaces.Box(low=-ACTION_LIMIT, high=ACTION_LIMIT, shape=(2,))
+        return gym.spaces.Box(low=-ACTION_LIMIT, high=ACTION_LIMIT, shape=(2,), dtype=np.float32)
 
     @property
     def task(self):

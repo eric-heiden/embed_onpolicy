@@ -5,6 +5,10 @@
 	path = garage
 	url = https://github.com/rlworkgroup/garage.git
 	branch = eric-pushenv
+[submodule "garage_rjzp"]
+	path = garage_rjzp
+	url = https://github.com/rlworkgroup/garage.git
+	branch = rjzp
 [submodule "multiworld"]
 	path = multiworld
 	url = https://github.com/vitchyr/multiworld.git
