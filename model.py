@@ -19,6 +19,7 @@ class Model(object):
                  lr: TimeVarying, policy_entropy: TimeVarying, vf_coef: TimeVarying, max_grad_norm,
                  embedding_entropy: TimeVarying = const_fn(0.), inference_horizon=5, seed=None, em_hidden_layers=(8,),
                  pi_hidden_layers=(16, 16), vf_hidden_layers=(16, 16), inference_hidden_layers=(16,),
+                 embed_grad_factor=1e4,
                  use_embedding=True, **_kwargs):
 
         self.traj_size = traj_size
@@ -177,6 +178,9 @@ class Model(object):
             normalized_grads = []
             for i in range(len(gradients)):
                 normalized_grads.append(np.mean(gradients[i], axis=0))
+
+            # normalized_grads[:5] *= np.full(5, embed_grad_factor)
+
             sess.run([_train], {
                 src_grads: normalized_grads,
                 LR: lr(iteration),
@@ -185,8 +189,7 @@ class Model(object):
 
             if use_embedding:
                 grad_means = {name: np.mean(g) for g, name in zip(normalized_grads[:5],
-                                                                  ['embed_fc1/w', 'embed_fc1/b', 'embed_fc/w',
-                                                                   'embed_fc/b', 'em_logstd'])}
+                                                                  map(str, params[:5]))}
                 print("Embedding grads:", grad_means)
 
             return np.mean(losses, axis=0), computed_latents, advantages

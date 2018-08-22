@@ -26,7 +26,7 @@ from policies import MlpEmbedPolicy
 import ppo2embed
 
 SEED = 12345
-TRAJ_SIZE = 200
+TRAJ_SIZE = 20
 
 
 # use Beta distribution for policy, Gaussian otherwise
@@ -81,13 +81,13 @@ def train(num_timesteps, seed, log_folder):
                     task_space=task_space,
                     latent_space=latent_space,
                     traj_size=TRAJ_SIZE,
-                    nbatches=40,
+                    nbatches=15,
                     lam=0.9,
                     gamma=0.9,
-                    policy_entropy=ppo2embed.linear_transition(-0.1, -1., 50),  # .01,  # 0.1,
-                    embedding_entropy=ppo2embed.linear_transition(-0.1, 0.01, 50),  # -0.01,  # 0.01,
-                    inference_coef=0.01,  #.001,  # 0.03,  # .001,
-                    inference_opt_epochs=3,  # 3,
+                    policy_entropy=ppo2embed.linear_transition(0.01, 0., 50),  # .01,  # 0.1,
+                    embedding_entropy=ppo2embed.linear_transition(-1e3, 1, 150),  # -0.01,  # 0.01,
+                    inference_coef=1.,  #.001,  # 0.03,  # .001,
+                    inference_opt_epochs=5,  # 3,
                     inference_horizon=6,
                     log_interval=1,
                     em_hidden_layers=(4,),

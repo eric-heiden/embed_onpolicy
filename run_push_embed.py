@@ -17,6 +17,7 @@ from curriculum import BasicCurriculum
 
 sys.path.insert(0, osp.join(osp.dirname(__file__), 'baselines'))
 sys.path.insert(0, osp.join(osp.dirname(__file__), 'garage'))
+# sys.path.insert(0, osp.join(osp.dirname(__file__), 'garage_hz'))
 
 from baselines import logger
 from baselines.common import set_global_seeds
@@ -31,7 +32,7 @@ import ppo2embed
 
 START_SEED = 12345
 TRAJ_SIZE = 200
-TASKS = ["down"]  # , "down", "left", "right"]
+TASKS = ["up", "down", "left", "right"]
 CONTROL_MODE = "position_control"
 EASY_GRIPPER_INIT = False
 RANDOMIZE_START_POS = False
@@ -40,7 +41,7 @@ RANDOMIZE_START_POS = False
 USE_BETA = False
 ACTION_SCALE = 1. if USE_BETA else 1.
 SKIP_STEPS = 4
-USE_EMBEDDING = False
+USE_EMBEDDING = True
 
 
 def unwrap_env(env: VecNormalize, id: int = 0):
@@ -48,6 +49,7 @@ def unwrap_env(env: VecNormalize, id: int = 0):
 
 
 def train(num_timesteps, seed, log_folder):
+    # TASKS = [np.array([-0.15, 0, 0]), np.array([0.15, 0, 0]), np.array([0, -0.15, 0]), np.array([0, 0.15, 0])]
     logger.configure(dir=log_folder, format_strs=['stdout', 'log', 'csv'])
     ncpu = 1
     config = tf.ConfigProto(allow_soft_placement=True,
@@ -158,22 +160,22 @@ def train(num_timesteps, seed, log_folder):
                     task_space=task_space,
                     latent_space=latent_space,
                     traj_size=TRAJ_SIZE,
-                    nbatches=40,
+                    nbatches=10,
                     lam=0.9,
-                    gamma=0.9,
-                    policy_entropy=ppo2embed.linear_transition(-1, -10., 50),  # .01,  # 0.1,
-                    embedding_entropy=-1e3,  # -0.01,  # 0.01,
-                    inference_coef=0.,  #.001,  # 0.03,  # .001,
-                    inference_opt_epochs=3,  # 3,
-                    inference_horizon=3,
+                    gamma=0.95,
+                    policy_entropy=ppo2embed.linear_transition(0.01, 0., 50),  # .01,  # 0.1,
+                    embedding_entropy=ppo2embed.linear_transition(-10, 1e-3, 250),  # -0.01,  # 0.01,
+                    inference_coef=0.5,  #.001,  # 0.03,  # .001,
+                    inference_opt_epochs=10,  # 3,
+                    inference_horizon=20,
                     log_interval=1,
-                    em_hidden_layers=(2,),
+                    em_hidden_layers=(8,),
                     pi_hidden_layers=(200, 100),
                     vf_hidden_layers=(200, 100),
+                    inference_hidden_layers=(40, 40),
                     vf_coef=ppo2embed.linear_transition(.1, .2, 400),
-                    inference_hidden_layers=(200, 100),
                     render_fn=render_robot,
-                    lr=ppo2embed.linear_transition(7e-3, 5e-3, 300, continue_beyond_end=True, absolute_min=1e-4),
+                    lr=ppo2embed.linear_transition(3e-3, 5e-4, 300, continue_beyond_end=True, absolute_min=1e-4),
                     cliprange=0.2,
                     seed=seed,
                     total_timesteps=num_timesteps,
@@ -189,11 +191,11 @@ def train(num_timesteps, seed, log_folder):
 
 
 @click.command()
-@click.option('--n_parallel_seeds', type=int, default=4)
+@click.option('--n_parallel_seeds', type=int, default=1)
 def main(n_parallel_seeds):
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     if n_parallel_seeds == 1:
-        log_folder = osp.join(osp.dirname(__file__), 'log/push_pos_embed_%i_%s' % (START_SEED, timestamp))
+        log_folder = osp.join(osp.dirname(__file__), 'log/push_embed_%i_%s' % (START_SEED, timestamp))
         print("Logging to %s." % log_folder)
         plot_folder = osp.join(log_folder, "plots")
         if plot_folder and not os.path.exists(plot_folder):
@@ -204,14 +206,16 @@ def main(n_parallel_seeds):
         train(num_timesteps=1e6, seed=START_SEED, log_folder=log_folder)
     else:
         log_folder_parent = osp.join(osp.dirname(__file__), 'log/push_pos_embed_%s' % timestamp)
+        if not os.path.exists(log_folder_parent):
+            os.makedirs(log_folder_parent)
+        with ZipFile(osp.join(log_folder_parent, "source.zip"), 'w') as zip:
+            for file in [osp.basename(__file__), "ppo2embed.py", "sampler.py", "policies.py", "visualizer.py"]:
+                zip.write(file)
         for seed in range(START_SEED, START_SEED + n_parallel_seeds):
             log_folder = osp.join(log_folder_parent, str(seed))
             plot_folder = osp.join(log_folder, "plots")
             if plot_folder and not os.path.exists(plot_folder):
                 os.makedirs(plot_folder)
-            with ZipFile(osp.join(log_folder, "source.zip"), 'w') as zip:
-                for file in [osp.basename(__file__), "ppo2embed.py", "sampler.py", "policies.py", "visualizer.py"]:
-                    zip.write(file)
             p = Process(target=train, args=(1e6, seed, log_folder))
             p.start()
 

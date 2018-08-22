@@ -33,10 +33,10 @@ TRAJ_SIZE = 200
 
 GOALS = [
   # (  z     x,    y)
-    (0.5,  0.3, 0.15),
-    (0.5, -0.3, 0.15),
-    (0.5,  0.3,  0.3),
-    (0.5, -0.3,  0.3),
+  #   (0.5,  0.3, 0.15),
+  #   (0.5, -0.3, 0.15),
+  #   (0.5,  0.3,  0.3),
+  #   (0.5, -0.3,  0.3),
     (0.7,  0.3, 0.15),
     (0.7, -0.3, 0.15),
     (0.7,  0.3,  0.3),
@@ -69,7 +69,7 @@ def train(num_timesteps, seed, log_folder):
     latent_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float32)
 
     env_fn = lambda task: VecNormalize(
-        DummyVecEnv([lambda: SawyerEnvWrapper(ReacherEnv(GOALS[task]))]),
+        DummyVecEnv([lambda: SawyerEnvWrapper(ReacherEnv(GOALS[task], control_method=CONTROL_MODE))]),
         ob=False, ret=False
     )
 
@@ -123,10 +123,10 @@ def train(num_timesteps, seed, log_folder):
                     rew_x = int(j * width_factor)
                     if r < 0:
                         rew_y = int(-r / max_reward * lower_part) if -r <= max_reward else lower_part
-                        color = blue if infos[j]["episode"]["grasped"] else red
+                        color = red
                     else:
                         rew_y = int(r / max_reward * lower_part) if r <= max_reward else lower_part
-                        color = blue if infos[j]["episode"]["grasped"] else orange
+                        color = orange
                     img_center[-rew_y - 1:, p_rew_x:rew_x] = color
                     img_center[-rew_y - 1:, p_rew_x:rew_x] = color
                     p_rew_x = rew_x
@@ -135,10 +135,10 @@ def train(num_timesteps, seed, log_folder):
                     rew_x = int(j * width_factor)
                     if r < 0:
                         rew_y = int(-r / max_reward * lower_part) if -r <= max_reward else lower_part
-                        color = blue if infos[j]["episode"]["grasped"] else red
+                        color = red
                     else:
                         rew_y = int(r / max_reward * lower_part) if r <= max_reward else lower_part
-                        color = blue if infos[j]["episode"]["grasped"] else orange
+                        color = orange
                     img_center[-rew_y - 1:, rew_x] = color
                     img_center[-rew_y - 1:, rew_x] = color
 
@@ -162,20 +162,21 @@ def train(num_timesteps, seed, log_folder):
                     task_space=task_space,
                     latent_space=latent_space,
                     traj_size=TRAJ_SIZE,
-                    nbatches=40,
+                    nbatches=20,
                     lam=0.9,
-                    gamma=0.9,
-                    policy_entropy=ppo2embed.linear_transition(-0.1, -1., 50),  # .01,  # 0.1,
-                    embedding_entropy=ppo2embed.linear_transition(-0.1, 0.01, 50),  # -0.01,  # 0.01,
-                    inference_coef=0.01,  #.001,  # 0.03,  # .001,
+                    gamma=0.95,
+                    policy_entropy=ppo2embed.linear_transition(0.01, 0., 50),  # .01,  # 0.1,
+                    embedding_entropy=-1e3,  # -0.01,  # 0.01,
+                    inference_coef=0.01,  # .001,  # 0.03,  # .001,
                     inference_opt_epochs=3,  # 3,
                     inference_horizon=6,
                     log_interval=1,
-                    em_hidden_layers=(4,),
+                    em_hidden_layers=(2,),
                     pi_hidden_layers=(200, 100),
                     vf_hidden_layers=(200, 100),
-                    vf_coef=ppo2embed.linear_transition(.1, .2, 400),
                     inference_hidden_layers=(200, 100),
+                    vf_coef=ppo2embed.linear_transition(.1, .2, 400),
+                    pg_coef=1000.,
                     render_fn=render_robot,
                     lr=ppo2embed.linear_transition(7e-3, 5e-3, 300, continue_beyond_end=True, absolute_min=1e-4),
                     cliprange=0.2,
